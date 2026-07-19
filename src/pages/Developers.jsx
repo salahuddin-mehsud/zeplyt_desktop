@@ -11,7 +11,7 @@ const Developers = () => {
         <h1 className="text-2xl font-bold tracking-tight">Developer API</h1>
       </div>
       <p className="text-gray-600 mb-6 leading-relaxed">
-        Welcome to the Averon POS API. Use the endpoints below to integrate your own applications,
+        Welcome to the ZEPLYT POS API. Use the endpoints below to integrate your own applications,
         websites, or third‑party services with our POS system.
       </p>
 
@@ -52,7 +52,7 @@ const Developers = () => {
           <h2 className="text-base font-bold text-gray-800">API Endpoints</h2>
         </div>
         <p className="text-sm text-gray-600 mb-3">
-          Base URL: <code className="bg-gray-200 px-2 py-0.5 rounded text-gray-800">https://averon.com/api/external</code>
+          Base URL: <code className="bg-gray-200 px-2 py-0.5 rounded text-gray-800">https://zeplyt.com/api/external</code>
         </p>
 
         {/* GET /categories */}

@@ -188,7 +188,7 @@ const Financials = () => {
       const dark = [24, 24, 27];
 
       doc.setFontSize(22); doc.setTextColor(blue[0], blue[1], blue[2]);
-      doc.text("AVERON POS BUSINESS SOLUTIONS", 14, 20);
+      doc.text("ZEPLYT POS BUSINESS SOLUTIONS", 14, 20);
       doc.setFontSize(10); doc.setTextColor(100, 100, 100);
       doc.text(`Official Document: ${reportType.toUpperCase()}`, 14, 28);
       doc.text(`Reporting Period: ${period}`, 14, 33);
@@ -247,7 +247,7 @@ const Financials = () => {
           headStyles: { fillColor: [220, 38, 38] }
         });
       }
-      doc.save(`Averon_${reportType.replace(/\s+/g, '_')}.pdf`);
+      doc.save(`ZEPLYT_${reportType.replace(/\s+/g, '_')}.pdf`);
     }
 
     if (format === 'EXCEL') {
@@ -260,7 +260,7 @@ const Financials = () => {
         ];
         const ws = XLSX.utils.json_to_sheet(sheetData);
         XLSX.utils.book_append_sheet(wb, ws, "FinancialData");
-        XLSX.writeFile(wb, `Averon_Excel_Export.xlsx`);
+        XLSX.writeFile(wb, `ZEPLYT_Excel_Export.xlsx`);
     }
   };
 
