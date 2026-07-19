@@ -1,0 +1,75 @@
+{
+  "name": "client",
+  "private": true,
+  "version": "1.0.0",
+  "main": "main.cjs",
+  "type": "module",
+  "productName": "ZEPLYT 1.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "electron:dev": "concurrently -k \"npm run dev\" \"wait-on tcp:5174 && electron .\"",
+    "electron:build": "vite build && electron-builder"
+  },
+  "dependencies": {
+    "@stripe/react-stripe-js": "^6.1.0",
+    "@stripe/stripe-js": "^9.0.1",
+    "@tailwindcss/vite": "^4.2.2",
+    "@tiptap/extension-font-family": "^3.22.3",
+    "@tiptap/extension-text-align": "^3.22.3",
+    "@tiptap/extension-underline": "^3.22.3",
+    "@tiptap/react": "^3.22.3",
+    "@tiptap/starter-kit": "^3.22.3",
+    "axios": "^1.14.0",
+    "date-fns": "^4.4.0",
+    "esc-pos-encoder": "^3.0.0",
+    "file-saver": "^2.0.5",
+    "jimp": "^0.22.12",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.7",
+    "qrcode.react": "^4.2.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-icons": "^5.6.0",
+    "react-router-dom": "^7.13.2",
+    "recharts": "^3.8.1",
+    "serialport": "^13.0.0",
+    "socket.io-client": "^4.8.3",
+    "tailwindcss": "^4.2.2",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^10.0.3",
+    "electron": "^43.0.0",
+    "electron-builder": "^26.15.3",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.4.0",
+    "vite": "^8.0.1",
+    "wait-on": "^9.0.10"
+  },
+  "build": {
+    "appId": "com.zeplyt.pos",
+    "productName": "ZEPLYT 1.0",
+    "directories": {
+      "output": "release"
+    },
+    "asar": false,
+    "files": [
+      "dist/**/*",
+      "main.cjs",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "public/logo.png"
+    }
+  }
+}
