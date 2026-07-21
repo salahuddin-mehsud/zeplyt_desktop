@@ -52,10 +52,47 @@ export function generateReceiptHTML(order, type = 'kitchen', settings) {
     itemColumns = [], totalsFormat, decimalPlaces = 2, fontMultiplier = 1,
   } = settings;
 
-  const visibleCols = (itemColumns.length ? itemColumns : []).filter(c => c.visible !== false);
+  // ── Define default width percentages for each column ──
+  const defaultWidths = {
+    sr: 5,
+    name: 45,
+    qty: 10,
+    price: 15,
+    amount: 25,
+  };
+  // For kitchen, we use only sr, name, qty – adjust proportions
+  const kitchenWidths = {
+    sr: 10,
+    name: 70,
+    qty: 20,
+  };
 
+  // Get visible columns, use settings widths if provided, else fallback
+  let cols = itemColumns.length ? itemColumns : getDefaultColumns(type);
+  if (type === 'kitchen') {
+    cols = cols.filter(col => col.key !== 'price' && col.key !== 'amount');
+  }
+  const visibleCols = cols.filter(c => c.visible !== false);
+
+  // Assign width percentages
+  const widths = type === 'kitchen' ? kitchenWidths : defaultWidths;
+  let totalWidth = 0;
+  const colsWithWidth = visibleCols.map(col => {
+    let w = col.width && col.width > 0 ? col.width : (widths[col.key] || 10);
+    // Convert to percentage; if width is numeric but less than 100, treat as percentage already (if > 1)
+    // But our defaults are percentages, so use as is.
+    totalWidth += w;
+    return { ...col, width: w };
+  });
+  // Normalize so they sum to 100
+  const normalized = colsWithWidth.map(col => ({
+    ...col,
+    pct: ((col.width / totalWidth) * 100).toFixed(2)
+  }));
+
+  // Build item rows
   const itemsRowsHTML = items.map((item, idx) => {
-    const cells = visibleCols.map(col => {
+    const cells = normalized.map(col => {
       let val = '';
       switch (col.key) {
         case 'sr': val = idx + 1; break;
@@ -65,15 +102,16 @@ export function generateReceiptHTML(order, type = 'kitchen', settings) {
         case 'amount': val = (item.price * item.qty).toFixed(decimalPlaces); break;
         default: val = '';
       }
-      return `<td style="padding:1mm; text-align:${col.align || 'left'};">${val}</td>`;
+      return `<td style="padding:0; text-align:${col.align || 'left'}; width:${col.pct}%;">${val}</td>`;
     }).join('');
     return `<tr>${cells}</tr>`;
   }).join('');
 
-  const headerRowHTML = visibleCols.map(col =>
-    `<th style="text-align:${col.align || 'left'}; padding:1mm;">${col.label}</th>`
+  const headerRowHTML = normalized.map(col =>
+    `<th style="padding:0; text-align:${col.align || 'left'}; width:${col.pct}%;">${col.label}</th>`
   ).join('');
 
+  // Totals lines – no extra padding, full width
   const totalsHTML = (totalsFormat || '')
     .replace(/{subtotal}/g, (subTotal ?? 0).toFixed(decimalPlaces))
     .replace(/{tax}/g, (taxAmount ?? 0).toFixed(decimalPlaces))
@@ -81,83 +119,130 @@ export function generateReceiptHTML(order, type = 'kitchen', settings) {
     .replace(/{total}/g, (finalAmount ?? 0).toFixed(decimalPlaces))
     .split('\n')
     .filter(l => l.trim())
-    .map(l => `<p style="margin:1mm 0; white-space:pre;">${l}</p>`)
+    .map(l => `<p style="margin:0; padding:0; white-space:pre;">${l}</p>`)
     .join('');
 
-  return `
-    <div style="font-family: monospace; width: 80mm; margin: 0 auto; padding: 1mm; font-size:${fontMultiplier}em;">
+  const fm = Math.max(0.5, Math.min(2.0, fontMultiplier || 1));
+
+  // Build full HTML with explicit body and container styling
+  const html = `
+    <div style="font-family: monospace; width:100%; margin:0; padding:0; box-sizing:border-box; font-size:${fm}em;">
       <div style="text-align:center;">
-        ${logoUrl ? `<img src="${logoUrl}" style="width:${logoWidth || 192}px; max-width:100%; margin-bottom:2mm;" />` : ''}
+        ${logoUrl ? `<img src="${logoUrl}" style="width:${logoWidth || 192}px; max-width:100%; margin-bottom:1mm;" />` : ''}
         ${headerLines.map(l => renderLine(l, globalAlignment, globalBold, globalDoubleHeight)).join('')}
       </div>
 
-      ${showToken !== false ? `<p style="margin:1mm 0;"><strong>TOKEN:</strong> #${tokenNo}</p>` : ''}
-      ${showOrderNo ? `<p style="margin:1mm 0;"><strong>Order:</strong> ${orderNo}</p>` : ''}
-      <p style="margin:1mm 0;"><strong>Type:</strong> ${orderType} ${table?.name ? `- ${table.name}` : ''}</p>
-      ${showDateTime !== false ? `<p style="margin:1mm 0;"><strong>${type === 'kitchen' ? 'Time' : 'Date'}:</strong> ${type === 'kitchen' ? new Date(createdAt).toLocaleTimeString() : new Date(createdAt).toLocaleString()}</p>` : ''}
-      ${showCustomerName !== false ? `<p style="margin:1mm 0;"><strong>${type === 'kitchen' ? '' : 'Guest:'}</strong> ${customerName || 'Walk-in'}</p>` : ''}
-      ${showTable !== false && table?.name ? '' : ''}
-      ${showDivider !== false ? '<hr style="margin:1mm 0;"/>' : ''}
+      ${showToken !== false ? `<p style="margin:0; padding:0;">TOKEN: #${tokenNo}</p>` : ''}
+      ${showOrderNo ? `<p style="margin:0; padding:0;">Order: ${orderNo}</p>` : ''}
+      <p style="margin:0; padding:0;">Type: ${orderType} ${table?.name ? `- ${table.name}` : ''}</p>
+      ${showDateTime !== false ? `<p style="margin:0; padding:0;">${type === 'kitchen' ? 'Time' : 'Date'}: ${type === 'kitchen' ? new Date(createdAt).toLocaleTimeString() : new Date(createdAt).toLocaleString()}</p>` : ''}
+      ${showCustomerName !== false ? `<p style="margin:0; padding:0;">${type === 'kitchen' ? '' : 'Guest:'} ${customerName || 'Walk-in'}</p>` : ''}
+      ${showDivider !== false ? '<hr style="margin:0.5mm 0; border:0; border-top:1px solid #000;"/>' : ''}
 
-      <table style="width:100%; border-collapse:collapse;">
+      <table style="width:100%; border-collapse:collapse; table-layout:fixed; margin:0; padding:0; font-size:${fm}em;">
         <thead><tr>${headerRowHTML}</tr></thead>
         <tbody>${itemsRowsHTML}</tbody>
       </table>
 
-      ${instructions ? `<hr style="margin:1mm 0;"/><p style="margin:1mm 0;"><strong>NOTES:</strong> ${instructions}</p>` : ''}
-      ${showDivider !== false ? '<hr style="margin:1mm 0;"/>' : ''}
+      ${instructions ? `<hr style="margin:0.5mm 0; border:0; border-top:1px solid #000;"/><p style="margin:0; padding:0;"><strong>NOTES:</strong> ${instructions}</p>` : ''}
+      ${showDivider !== false ? '<hr style="margin:0.5mm 0; border:0; border-top:1px solid #000;"/>' : ''}
 
       ${type !== 'kitchen' ? totalsHTML : ''}
-      ${type !== 'kitchen' && showTotal !== false && !totalsFormat ? `<p style="margin:1mm 0;"><strong>TOTAL: ${(finalAmount ?? 0).toFixed(decimalPlaces)}</strong></p>` : ''}
+      ${type !== 'kitchen' && showTotal !== false && !totalsFormat ? `<p style="margin:0; padding:0; font-weight:bold;">TOTAL: ${(finalAmount ?? 0).toFixed(decimalPlaces)}</p>` : ''}
 
-      <div style="text-align:center;">
+      <div style="text-align:center; margin:0; padding:0;">
         ${footerLines.map(l => renderLine(l, globalAlignment, globalBold, globalDoubleHeight)).join('')}
       </div>
     </div>
   `;
+
+  // 🔍 LOG the HTML so you can inspect it in the browser console
+  console.log('[RECEIPT] Generated HTML:\n', html);
+  return html;
+}
+
+// Helper to get default columns (for fallback)
+function getDefaultColumns(type) {
+  if (type === 'kitchen') {
+    return [
+      { key: 'sr', label: 'Sr.', align: 'left', visible: true },
+      { key: 'name', label: 'Item', align: 'left', visible: true },
+      { key: 'qty', label: 'Qty', align: 'right', visible: true },
+    ];
+  }
+  return [
+    { key: 'sr', label: 'Sr.', align: 'left', visible: true },
+    { key: 'name', label: 'Item', align: 'left', visible: true },
+    { key: 'qty', label: 'Qty', align: 'right', visible: true },
+    { key: 'price', label: 'Price', align: 'right', visible: true },
+    { key: 'amount', label: 'Amt', align: 'right', visible: true },
+  ];
 }
 
 export function printReceiptHTML(order, type, settings) {
   const html = generateReceiptHTML(order, type, settings);
+  const fullDoc = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Print Receipt</title>
+        <style>
+          * { margin:0; padding:0; box-sizing:border-box; }
+          @page { size: 85mm auto; margin: 0; }
+          body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            font-family: 'Courier New', Courier, monospace;
+          }
+          table, p, div, hr {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            box-sizing: border-box;
+          }
+          hr { border: none; border-top: 1px solid #000; }
+          @media print { body { margin: 0; padding: 0; width: 100%; } }
+        </style>
+      </head>
+      <body>${html}</body>
+    </html>
+  `;
+
   const iframe = document.createElement('iframe');
   iframe.style.position = 'absolute';
   iframe.style.width = '0';
   iframe.style.height = '0';
   iframe.style.border = '0';
   document.body.appendChild(iframe);
+
   const doc = iframe.contentWindow.document;
   doc.open();
-  doc.write(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>Print Receipt</title>
-        <style>
-          @page {
-            size: 80mm auto;
-            margin: 0;
-            margin-top: 0;
-            margin-bottom: 0;
-          }
-          body {
-            margin: 0;
-            padding: 0;
-            width: 80mm;
-            font-size: 11pt;
-          }
-          h1, h2, h3, p, table { margin: 0; padding: 0; }
-          @media print { body { margin: 0; } }
-        </style>
-      </head>
-      <body>${html}</body>
-    </html>
-  `);
+  doc.write(fullDoc);
   doc.close();
-  iframe.contentWindow.focus();
-  iframe.contentWindow.print();
-  setTimeout(() => document.body.removeChild(iframe), 1000);
-}
 
+  let printed = false;
+
+  const printAndCleanup = () => {
+    if (printed) return;
+    printed = true;
+    iframe.contentWindow.focus();
+    iframe.contentWindow.print();
+    setTimeout(() => {
+      if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
+    }, 2000);
+  };
+
+  // Use a one-time event listener
+  iframe.addEventListener('load', printAndCleanup, { once: true });
+
+  // Fallback: if onload doesn't fire within 1 second, trigger print anyway
+  setTimeout(() => {
+    if (!printed && iframe.contentWindow) {
+      printAndCleanup();
+    }
+  }, 1000);
+}
 function alignText(text, width, align = 'left') {
   text = String(text ?? '');
   if (text.length > width) text = text.slice(0, width);
