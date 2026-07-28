@@ -81,9 +81,24 @@ function fitColumnsToWidth(columns, maxWidth) {
   return cols;
 }
 
+
+function replacePlaceholders(text, order, table, orderType) {
+  return (text || '')
+    .replace(/{token}/g, order.tokenNo ?? '')
+    .replace(/{orderNo}/g, order.orderNo ?? '')
+    .replace(/{type}/g, orderType || '')
+    .replace(/{table}/g, table?.name ?? '')
+    .replace(/{customer}/g, order.customerName || 'Walk-in')
+    .replace(/{guest}/g, order.customerName || 'Walk-in')
+    .replace(/{date}/g, new Date(order.createdAt).toLocaleDateString())
+    .replace(/{time}/g, new Date(order.createdAt).toLocaleTimeString())
+    .replace(/{datetime}/g, new Date(order.createdAt).toLocaleString());
+}
+
 // ---- Generate ESC/POS data ----
 async function generateEscPos(order, type, settings) {
   console.log(`[MAIN] generateEscPos called for type="${type}"`);
+  const orderType = order.type;
   const encoder = new EscPosEncoder();
   encoder.initialize();
   encoder.raw([0x1B, 0x33, 0]); // tight line spacing
@@ -93,24 +108,61 @@ async function generateEscPos(order, type, settings) {
   const baseAlign = s.globalAlignment || 'left';
 
   const printLine = (lineObj) => {
-    if (!lineObj || !lineObj.text) return;
-    const align = lineObj.alignment || baseAlign; // uses the LINE'S OWN setting, never forced
-    const bold = lineObj.bold ?? s.globalBold ?? false;
-    const doubleH = lineObj.doubleHeight ?? s.globalDoubleHeight ?? false;
-    const text = padLine(lineObj.text, align);
+  if (!lineObj || !lineObj.text) return;
 
-    if (bold) encoder.bold(true);
-    if (doubleH) encoder.size(1, 2);
-    rawText(encoder, text);
+  // ── Alignment ──
+  const align = lineObj.alignment || baseAlign;
+
+  // ── Bold ──
+  const bold = lineObj.bold ?? s.globalBold ?? false;
+
+  // ── Double Height (ESC/POS) ──
+  // If fontSize > 1.5, we treat it as double‑height; if > 2.5, double‑height + double‑width.
+  const fontSize = lineObj.fontSize || 1;
+  let doubleH = lineObj.doubleHeight ?? s.globalDoubleHeight ?? false;
+  let doubleW = false;
+  if (fontSize > 2.5) {
+    doubleH = true;
+    doubleW = true;
+  } else if (fontSize > 1.5) {
+    doubleH = true;
+  }
+  // If the user explicitly set doubleHeight, honour that, but we keep the computed if not.
+
+  // ── Padding (feeds before and after) ──
+  const paddingTop = lineObj.paddingTop || 0;
+  const paddingBottom = lineObj.paddingBottom || 0;
+
+  // ── Feed before the line ──
+  for (let i = 0; i < Math.round(paddingTop); i++) {
     feed(encoder);
-    if (doubleH) encoder.size(1, 1);
-    if (bold) encoder.bold(false);
+  }
 
-    if (lineObj.dividerBelow) {
-      rawText(encoder, '-'.repeat(MAX_LINE_WIDTH));
-      feed(encoder);
-    }
-  };
+  // ── Print the line itself ──
+  const text = padLine(lineObj.text, align);
+  if (bold) encoder.bold(true);
+  if (doubleH && doubleW) encoder.size(2, 2);   // double width + height
+  else if (doubleH) encoder.size(1, 2);         // double height only
+  else if (doubleW) encoder.size(2, 1);         // double width only (unlikely)
+  else encoder.size(1, 1);                      // normal
+
+  rawText(encoder, text);
+  feed(encoder);
+  if (bold) encoder.bold(false);
+  // reset size after line
+  encoder.size(1, 1);
+
+  // ── Divider below ──
+  if (lineObj.dividerBelow) {
+    rawText(encoder, '-'.repeat(MAX_LINE_WIDTH));
+    feed(encoder);
+  }
+
+  // ── Feed after the line ──
+  for (let i = 0; i < Math.round(paddingBottom); i++) {
+    feed(encoder);
+  }
+};
 
   const printSpacing = (count) => {
     const n = Math.max(0, Math.min(count ?? 0, 5));
@@ -125,9 +177,13 @@ async function generateEscPos(order, type, settings) {
 
   // ---- Header lines ----
   if (s.headerLines?.length) {
-    s.headerLines.forEach(printLine);
-    printSpacing(s.sectionMargin ?? 1);
-  }
+  s.headerLines.forEach(lineObj => {
+    const processedText = replacePlaceholders(lineObj.text, order, order.table, orderType);
+    const processedLine = { ...lineObj, text: processedText };
+    printLine(processedLine);
+  });
+  printSpacing(s.sectionMargin ?? 1);
+}
 
   // ---- Order info — every line software-padded, zero hardware align ----
   if (s.showToken !== false) {
@@ -243,13 +299,22 @@ async function generateEscPos(order, type, settings) {
   printSpacing(s.sectionMargin ?? 1);
 
   // ---- Footer ----
-  // ---- Footer ----
-  if (s.footerLines?.length) {
-    s.footerLines.forEach(printLine);
-  } else {
-    rawText(encoder, padLine('Thank you!', baseAlign));
-    feed(encoder);
-  }
+ if (s.footerLines?.length) {
+  s.footerLines.forEach(lineObj => {
+    const processedText = replacePlaceholders(lineObj.text, order, order.table, orderType);
+    const processedLine = { ...lineObj, text: processedText };
+    printLine(processedLine);
+  });
+}
+
+rawText(encoder, padLine('', baseAlign)); // blank line
+feed(encoder);
+const poweredByText = padLine('Powered by ZEPLYT POS', 'center');
+rawText(encoder, poweredByText);
+feed(encoder);
+// Optional: add a second blank line before cut
+rawText(encoder, padLine('', baseAlign));
+feed(encoder);
 
   // ---- Bottom margin — feed extra blank lines so the cutter clears the last printed line ----
   printSpacing(BOTTOM_MARGIN_LINES);

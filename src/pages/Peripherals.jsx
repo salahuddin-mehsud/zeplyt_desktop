@@ -9,8 +9,14 @@ const Peripherals = () => {
 
   // --- Browser print toggle ---
   const [useBrowserPrint, setUseBrowserPrint] = useState(() => {
-    return localStorage.getItem('useBrowserPrint') === 'true';
-  });
+  return localStorage.getItem('useBrowserPrint') === 'true';
+});
+  const printMode = useBrowserPrint ? 'browser' : 'ethernet';
+
+  const [settingsMode, setSettingsMode] = useState(() => {
+  return localStorage.getItem('settingsMode') || 'ethernet';
+});
+const currentModeLabel = settingsMode === 'browser' ? 'Browser' : 'Ethernet';
 
   // --- Receipt settings state ---
   const [activeReceiptTab, setActiveReceiptTab] = useState('bill');
@@ -130,27 +136,27 @@ const Peripherals = () => {
     };
   };
 
-  const fetchReceiptSettings = async (type) => {
-    try {
-      const res = await api.get(`/pos/receipt-settings/${type}`);
-      return res.data;
-    } catch (err) {
-      console.error(`Failed to fetch ${type} settings:`, err);
-      return getDefaultReceiptSettings(type);
-    }
-  };
+  const fetchReceiptSettings = async (type, mode) => {
+  try {
+    const res = await api.get(`/pos/receipt-settings/${type}?mode=${mode}`);
+    return res.data;
+  } catch (err) {
+    console.error(`Failed to fetch ${type} settings:`, err);
+    return getDefaultReceiptSettings(type);
+  }
+};
 
   useEffect(() => {
-    const loadAll = async () => {
-      setLoadingSettings(true);
-      const bill = await fetchReceiptSettings('bill');
-      const kitchen = await fetchReceiptSettings('kitchen');
-      setBillSettings(bill);
-      setKitchenSettings(kitchen);
-      setLoadingSettings(false);
-    };
-    loadAll();
-  }, []);
+  const loadAll = async () => {
+    setLoadingSettings(true);
+    const bill = await fetchReceiptSettings('bill', settingsMode);
+    const kitchen = await fetchReceiptSettings('kitchen', settingsMode);
+    setBillSettings(bill);
+    setKitchenSettings(kitchen);
+    setLoadingSettings(false);
+  };
+  loadAll();
+}, [settingsMode]);
 
   // ===== Ethernet handlers =====
   const handleAddEthernet = (e) => {
@@ -191,18 +197,18 @@ const Peripherals = () => {
 
   // ===== Receipt settings handlers =====
   const handleSaveReceiptSettings = async (type, data) => {
-    setSavingSettings(true);
-    try {
-      const res = await api.put(`/pos/receipt-settings/${type}`, data);
-      if (type === 'bill') setBillSettings(res.data);
-      else setKitchenSettings(res.data);
-      alert(`${type.charAt(0).toUpperCase()+type.slice(1)} settings saved!`);
-    } catch (err) {
-      alert('Failed to save settings');
-    } finally {
-      setSavingSettings(false);
-    }
-  };
+  setSavingSettings(true);
+  try {
+    const res = await api.put(`/pos/receipt-settings/${type}`, { ...data, mode: settingsMode });
+    if (type === 'bill') setBillSettings(res.data);
+    else setKitchenSettings(res.data);
+    alert(`${type.charAt(0).toUpperCase()+type.slice(1)} settings saved for ${settingsMode} mode!`);
+  } catch (err) {
+    alert('Failed to save settings');
+  } finally {
+    setSavingSettings(false);
+  }
+};
 
   const handleLogoUpload = async (type, file) => {
     if (!file) return;
@@ -242,7 +248,7 @@ const Peripherals = () => {
 
   // ===== Preview component =====
   const ReceiptPreview = ({ formData, type }) => {
-    const CHAR_WIDTH = 42;
+    const CHAR_WIDTH = 48;
     const lines = generateReceiptPreviewLines(SAMPLE_ORDER, type, formData, CHAR_WIDTH);
     const html = renderPreviewHTML(lines, formData.fontMultiplier || 1);
     return (
@@ -253,24 +259,26 @@ const Peripherals = () => {
         </div>
         <div className="bg-gray-100 border border-gray-200 rounded-xl p-4 flex justify-center">
           <div
-            className="bg-white shadow-md"
-            style={{
-              width: '300px',
-              padding: '10px 8px',
-              fontFamily: '"Courier New", Courier, monospace',
-              fontSize: '11px',
-              lineHeight: '1.25',
-              color: '#000',
-            }}
-            dangerouslySetInnerHTML={{ __html: html }}
-          />
+  className="bg-white shadow-md"
+  style={{
+    width: '80mm',           // exact thermal paper width
+    padding: '0',            // no extra padding – matches printer
+    fontFamily: '"Courier New", Courier, monospace',
+    fontSize: '11px',
+    lineHeight: '1.25',
+    color: '#000',
+    boxSizing: 'border-box',
+    overflow: 'hidden',
+  }}
+  dangerouslySetInnerHTML={{ __html: html }}
+/>
         </div>
       </div>
     );
   };
 
   // ===== Receipt settings form (unchanged) =====
-  const ReceiptSettingsForm = ({ settings, type, onSave, onLogoUpload, onRemoveLogo, uploadingLogo, savingSettings }) => {
+  const ReceiptSettingsForm = ({ settings, type, currentMode, onSave, onLogoUpload, onRemoveLogo, uploadingLogo, savingSettings }) => {
     const [formData, setFormData] = useState(settings);
     const [expandedLines, setExpandedLines] = useState({});
     const [importing, setImporting] = useState(false);
@@ -397,47 +405,153 @@ const Peripherals = () => {
             </button>
           </div>
 
-          {isExpanded && (
-            <div className="mt-1.5 grid grid-cols-2 md:grid-cols-4 gap-1.5 p-1.5 bg-gray-100 rounded">
-              <div>
-                <label className="block text-[8px] font-bold uppercase tracking-wider text-gray-500">Align</label>
-                <select
-                  value={lineObj.alignment || ''}
-                  onChange={(e) => handleLineChange(field, idx, 'alignment', e.target.value || null)}
-                  className="w-full bg-white border border-gray-200 rounded px-1.5 py-0.5 text-xs text-gray-800"
-                >
-                  <option value="">Global</option>
-                  <option value="left">Left</option>
-                  <option value="center">Center</option>
-                  <option value="right">Right</option>
-                </select>
-              </div>
-              <label className="flex items-center gap-1 text-xs text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={lineObj.bold || false}
-                  onChange={(e) => handleLineChange(field, idx, 'bold', e.target.checked)}
-                />
-                Bold
-              </label>
-              <label className="flex items-center gap-1 text-xs text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={lineObj.doubleHeight || false}
-                  onChange={(e) => handleLineChange(field, idx, 'doubleHeight', e.target.checked)}
-                />
-                Double Ht
-              </label>
-              <label className="flex items-center gap-1 text-xs text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={lineObj.dividerBelow || false}
-                  onChange={(e) => handleLineChange(field, idx, 'dividerBelow', e.target.checked)}
-                />
-                Divider Below
-              </label>
-            </div>
-          )}
+        {isExpanded && (
+  <div className="mt-1.5 grid grid-cols-2 md:grid-cols-7 gap-1.5 p-1.5 bg-gray-100 rounded">
+    {/* Align */}
+    <div>
+      <label className="block text-[8px] font-bold uppercase tracking-wider text-gray-500">Align</label>
+      <select
+        value={lineObj.alignment || ''}
+        onChange={(e) => handleLineChange(field, idx, 'alignment', e.target.value || null)}
+        className="w-full bg-white border border-gray-200 rounded px-1.5 py-0.5 text-xs text-gray-800"
+      >
+        <option value="">Global</option>
+        <option value="left">Left</option>
+        <option value="center">Center</option>
+        <option value="right">Right</option>
+      </select>
+    </div>
+    {/* Bold */}
+    <label className="flex items-center gap-1 text-xs text-gray-700">
+      <input
+        type="checkbox"
+        checked={lineObj.bold || false}
+        onChange={(e) => handleLineChange(field, idx, 'bold', e.target.checked)}
+      />
+      Bold
+    </label>
+    {/* Double Ht */}
+    <label className="flex items-center gap-1 text-xs text-gray-700">
+      <input
+        type="checkbox"
+        checked={lineObj.doubleHeight || false}
+        onChange={(e) => handleLineChange(field, idx, 'doubleHeight', e.target.checked)}
+      />
+      Double Ht
+    </label>
+    {/* Divider Below */}
+    <label className="flex items-center gap-1 text-xs text-gray-700">
+      <input
+        type="checkbox"
+        checked={lineObj.dividerBelow || false}
+        onChange={(e) => handleLineChange(field, idx, 'dividerBelow', e.target.checked)}
+      />
+      Divider Below
+    </label>
+
+    {/* Font Size (multiplier) */}
+    <div>
+      <label className="block text-[8px] font-bold uppercase tracking-wider text-gray-500">Font Size</label>
+      <div className="flex items-center gap-1">
+        <input
+          type="number"
+          value={lineObj.fontSize || 1}
+          onChange={(e) => handleLineChange(field, idx, 'fontSize', parseFloat(e.target.value) || 1)}
+          min="0.5"
+          max="3"
+          step="0.1"
+          className="w-10 bg-white border border-gray-200 rounded px-1 py-0.5 text-xs text-gray-800 text-center"
+        />
+        <div className="flex flex-col">
+          <button
+            type="button"
+            onClick={() => {
+              const val = (lineObj.fontSize || 1) + 0.1;
+              handleLineChange(field, idx, 'fontSize', Math.min(val, 3));
+            }}
+            className="text-[8px] leading-none text-blue-600 hover:text-blue-800"
+          >▲</button>
+          <button
+            type="button"
+            onClick={() => {
+              const val = (lineObj.fontSize || 1) - 0.1;
+              handleLineChange(field, idx, 'fontSize', Math.max(val, 0.5));
+            }}
+            className="text-[8px] leading-none text-blue-600 hover:text-blue-800"
+          >▼</button>
+        </div>
+      </div>
+    </div>
+
+    {/* Padding Top (mm) */}
+    <div>
+      <label className="block text-[8px] font-bold uppercase tracking-wider text-gray-500">Padding Top</label>
+      <div className="flex items-center gap-1">
+        <input
+          type="number"
+          value={lineObj.paddingTop || 0}
+          onChange={(e) => handleLineChange(field, idx, 'paddingTop', parseFloat(e.target.value) || 0)}
+          min="0"
+          max="5"
+          step="0.5"
+          className="w-10 bg-white border border-gray-200 rounded px-1 py-0.5 text-xs text-gray-800 text-center"
+        />
+        <div className="flex flex-col">
+          <button
+            type="button"
+            onClick={() => {
+              const val = (lineObj.paddingTop || 0) + 0.5;
+              handleLineChange(field, idx, 'paddingTop', Math.min(val, 5));
+            }}
+            className="text-[8px] leading-none text-blue-600 hover:text-blue-800"
+          >▲</button>
+          <button
+            type="button"
+            onClick={() => {
+              const val = (lineObj.paddingTop || 0) - 0.5;
+              handleLineChange(field, idx, 'paddingTop', Math.max(val, 0));
+            }}
+            className="text-[8px] leading-none text-blue-600 hover:text-blue-800"
+          >▼</button>
+        </div>
+      </div>
+    </div>
+
+    {/* 🆕 Padding Bottom (mm) */}
+    <div>
+      <label className="block text-[8px] font-bold uppercase tracking-wider text-gray-500">Padding Bottom</label>
+      <div className="flex items-center gap-1">
+        <input
+          type="number"
+          value={lineObj.paddingBottom || 0}
+          onChange={(e) => handleLineChange(field, idx, 'paddingBottom', parseFloat(e.target.value) || 0)}
+          min="0"
+          max="5"
+          step="0.5"
+          className="w-10 bg-white border border-gray-200 rounded px-1 py-0.5 text-xs text-gray-800 text-center"
+        />
+        <div className="flex flex-col">
+          <button
+            type="button"
+            onClick={() => {
+              const val = (lineObj.paddingBottom || 0) + 0.5;
+              handleLineChange(field, idx, 'paddingBottom', Math.min(val, 5));
+            }}
+            className="text-[8px] leading-none text-blue-600 hover:text-blue-800"
+          >▲</button>
+          <button
+            type="button"
+            onClick={() => {
+              const val = (lineObj.paddingBottom || 0) - 0.5;
+              handleLineChange(field, idx, 'paddingBottom', Math.max(val, 0));
+            }}
+            className="text-[8px] leading-none text-blue-600 hover:text-blue-800"
+          >▼</button>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
         </div>
       );
     };
@@ -796,37 +910,39 @@ const Peripherals = () => {
             <span className="text-[10px] text-gray-400 ml-2">(0–5 lines between sections)</span>
           </div>
 
-          <div className="flex gap-3 items-center mt-4">
-            <button
-              type="submit"
-              disabled={savingSettings}
-              className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded text-xs font-bold transition-colors disabled:opacity-50"
-            >
-              {savingSettings ? 'Saving...' : 'Save Settings'}
-            </button>
-            <button
-              type="button"
-              onClick={handleExport}
-              className="bg-green-100 text-green-700 border border-green-200 px-3 py-1.5 rounded text-xs font-bold hover:bg-green-600 hover:text-white transition-colors"
-            >
-              📤 Export
-            </button>
-            <button
-              type="button"
-              onClick={handleImportClick}
-              disabled={importing}
-              className="bg-amber-100 text-amber-700 border border-amber-200 px-3 py-1.5 rounded text-xs font-bold hover:bg-amber-600 hover:text-white transition-colors disabled:opacity-50"
-            >
-              {importing ? 'Importing...' : '📥 Import'}
-            </button>
-            <input
-              type="file"
-              accept=".json"
-              ref={fileInputRef}
-              onChange={handleImportFile}
-              className="hidden"
-            />
-          </div>
+        <div className="flex gap-3 items-center mt-4 flex-wrap">
+          <div className="flex gap-3 items-center mt-4 flex-wrap">
+  <button
+    type="submit"
+    disabled={savingSettings}
+    className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded text-xs font-bold transition-colors disabled:opacity-50"
+  >
+    {savingSettings ? 'Saving...' : `💾 Save ${currentMode} Settings`}
+  </button>
+</div>
+  <button
+    type="button"
+    onClick={handleExport}
+    className="bg-green-100 text-green-700 border border-green-200 px-3 py-1.5 rounded text-xs font-bold hover:bg-green-600 hover:text-white transition-colors"
+  >
+    📤 Export
+  </button>
+  <button
+    type="button"
+    onClick={handleImportClick}
+    disabled={importing}
+    className="bg-amber-100 text-amber-700 border border-amber-200 px-3 py-1.5 rounded text-xs font-bold hover:bg-amber-600 hover:text-white transition-colors disabled:opacity-50"
+  >
+    {importing ? 'Importing...' : '📥 Import'}
+  </button>
+  <input
+    type="file"
+    accept=".json"
+    ref={fileInputRef}
+    onChange={handleImportFile}
+    className="hidden"
+  />
+</div>
         </form>
         <div className="lg:w-[340px] shrink-0">
           <ReceiptPreview formData={formData} type={type} />
@@ -978,9 +1094,42 @@ const Peripherals = () => {
 
       {tab === 'customize' && (
         <div className="bg-white border border-gray-200 p-4 rounded-xl shadow-sm">
-          <h2 className="text-[10px] uppercase tracking-wider font-bold mb-3 text-gray-500">
-            Receipt Customization
-          </h2>
+          <h2 className="text-xs uppercase tracking-wider font-bold text-gray-500 mb-3">
+  Receipt Customization – <span className="text-blue-600">Mode: {currentModeLabel}</span>
+</h2>
+
+<div className="flex items-center gap-4 mb-4">
+  <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Settings Mode:</span>
+  <button
+    onClick={() => {
+      setSettingsMode('ethernet');
+      localStorage.setItem('settingsMode', 'ethernet');
+    }}
+    className={`px-3 py-1 rounded text-xs font-bold transition-colors ${
+      settingsMode === 'ethernet'
+        ? 'bg-gray-700 text-white'
+        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+    }`}
+  >
+    Ethernet
+  </button>
+  <button
+    onClick={() => {
+      setSettingsMode('browser');
+      localStorage.setItem('settingsMode', 'browser');
+    }}
+    className={`px-3 py-1 rounded text-xs font-bold transition-colors ${
+      settingsMode === 'browser'
+        ? 'bg-blue-600 text-white'
+        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+    }`}
+  >
+    Browser
+  </button>
+  <span className="text-[10px] text-gray-400 ml-auto">
+    Current: <span className="font-bold text-blue-600">{currentModeLabel}</span>
+  </span>
+</div>
 
           <div className="flex border-b border-gray-200 mb-4">
             <button
@@ -1002,14 +1151,15 @@ const Peripherals = () => {
           ) : (
             (activeReceiptTab === 'bill' ? billSettings : kitchenSettings) && (
               <ReceiptSettingsForm
-                settings={activeReceiptTab === 'bill' ? billSettings : kitchenSettings}
-                type={activeReceiptTab}
-                onSave={handleSaveReceiptSettings}
-                onLogoUpload={handleLogoUpload}
-                uploadingLogo={uploadingLogo}
-                onRemoveLogo={handleRemoveLogo}
-                savingSettings={savingSettings}
-              />
+  settings={activeReceiptTab === 'bill' ? billSettings : kitchenSettings}
+  type={activeReceiptTab}
+  currentMode={currentModeLabel}
+  onSave={handleSaveReceiptSettings}
+  onLogoUpload={handleLogoUpload}
+  uploadingLogo={uploadingLogo}
+  onRemoveLogo={handleRemoveLogo}
+  savingSettings={savingSettings}
+/>
             )
           )}
         </div>

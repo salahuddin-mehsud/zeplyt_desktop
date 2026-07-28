@@ -3,9 +3,26 @@ import api from '../services/api';
 function renderLine(lineObj, globalAlignment, globalBold, globalDoubleHeight) {
   if (!lineObj || !lineObj.text) return '';
   const align = lineObj.alignment || globalAlignment || 'left';
-  const bold = lineObj.bold || globalBold;
-  const doubleH = lineObj.doubleHeight || globalDoubleHeight;
-  const style = `text-align:${align}; ${bold ? 'font-weight:bold;' : ''} ${doubleH ? 'font-size:1.6em;' : ''} margin: 1mm 0;`;
+  const bold = lineObj.bold ?? globalBold;
+  const doubleH = lineObj.doubleHeight ?? globalDoubleHeight;
+  const fontSize = lineObj.fontSize || 1;
+  const paddingTop = lineObj.paddingTop || 0;
+  const paddingBottom = lineObj.paddingBottom || 0;
+
+  let style = `text-align:${align};`;
+  if (bold) style += ' font-weight:bold;';
+  if (doubleH) {
+    style += ' font-size:1.6em;';
+  } else {
+    style += ` font-size:${fontSize}em;`;
+  }
+  if (paddingTop > 0) {
+    style += ` margin-top:${paddingTop}mm;`;
+  }
+  if (paddingBottom > 0) {
+    style += ` margin-bottom:${paddingBottom}mm;`;
+  }
+
   let html = `<p style="${style}">${lineObj.text}</p>`;
   if (lineObj.dividerBelow) html += `<hr style="margin:1mm 0;"/>`;
   return html;
@@ -22,6 +39,21 @@ function formatItemLine(item, format, decimalPlaces) {
 
 export function generateReceiptHTML(order, type = 'kitchen', settings) {
   const { tokenNo, orderNo, type: orderType, table, customerName, createdAt, items, subTotal, taxAmount, discountAmount, finalAmount, instructions } = order;
+
+
+
+function replacePlaceholders(text, order, table, orderType) {
+  return (text || '')
+    .replace(/{token}/g, order.tokenNo ?? '')
+    .replace(/{orderNo}/g, order.orderNo ?? '')
+    .replace(/{type}/g, orderType || '')
+    .replace(/{table}/g, table?.name ?? '')
+    .replace(/{customer}/g, order.customerName || 'Walk-in')
+    .replace(/{guest}/g, order.customerName || 'Walk-in')
+    .replace(/{date}/g, new Date(order.createdAt).toLocaleDateString())
+    .replace(/{time}/g, new Date(order.createdAt).toLocaleTimeString())
+    .replace(/{datetime}/g, new Date(order.createdAt).toLocaleString());
+}
 
   if (!settings) {
     settings = {
@@ -129,7 +161,13 @@ export function generateReceiptHTML(order, type = 'kitchen', settings) {
     <div style="font-family: monospace; width:100%; margin:0; padding:0; box-sizing:border-box; font-size:${fm}em;">
       <div style="text-align:center;">
         ${logoUrl ? `<img src="${logoUrl}" style="width:${logoWidth || 192}px; max-width:100%; margin-bottom:1mm;" />` : ''}
-        ${headerLines.map(l => renderLine(l, globalAlignment, globalBold, globalDoubleHeight)).join('')}
+       ${headerLines.map(l => {
+  const processedLine = {
+    ...l,
+    text: replacePlaceholders(l.text, order, table, orderType)
+  };
+  return renderLine(processedLine, globalAlignment, globalBold, globalDoubleHeight);
+}).join('')}
       </div>
 
       ${showToken !== false ? `<p style="margin:0; padding:0;">TOKEN: #${tokenNo}</p>` : ''}
@@ -150,10 +188,17 @@ export function generateReceiptHTML(order, type = 'kitchen', settings) {
       ${type !== 'kitchen' ? totalsHTML : ''}
       ${type !== 'kitchen' && showTotal !== false && !totalsFormat ? `<p style="margin:0; padding:0; font-weight:bold;">TOTAL: ${(finalAmount ?? 0).toFixed(decimalPlaces)}</p>` : ''}
 
-      <div style="text-align:center; margin:0; padding:0;">
-        ${footerLines.map(l => renderLine(l, globalAlignment, globalBold, globalDoubleHeight)).join('')}
+            <div style="text-align:center; margin:0; padding:0;">
+        ${footerLines.map(l => {
+          const processedLine = {
+            ...l,
+            text: replacePlaceholders(l.text, order, table, orderType)
+          };
+          return renderLine(processedLine, globalAlignment, globalBold, globalDoubleHeight);
+        }).join('')}
+        <!-- 🔒 HARDCODED FOOTER: Powered by ZEPLYT POS -->
+        <p style="text-align:center; margin:0; padding:0; font-size:${fm}em; font-weight:normal;">Powered by ZEPLYT POS</p>
       </div>
-    </div>
   `;
 
   // 🔍 LOG the HTML so you can inspect it in the browser console
@@ -270,14 +315,29 @@ export function generateReceiptPreviewLines(order, type = 'kitchen', settings, c
 
   if (s.logoUrl) lines.push({ isLogo: true, logoUrl: s.logoUrl, logoWidth: s.logoWidth || 192 });
 
+  // ---- Header lines ----
   (s.headerLines || []).forEach(l => {
     if (!l.text) return;
     const align = l.alignment || baseAlign;
-    pushLine(alignText(l.text, charWidth, align), { align, bold: l.bold ?? s.globalBold, doubleHeight: l.doubleHeight ?? s.globalDoubleHeight });
+    const bold = l.bold ?? s.globalBold;
+    const doubleHeight = l.doubleHeight ?? s.globalDoubleHeight;
+    const fontSize = l.fontSize || 1;
+    const paddingTop = l.paddingTop || 0;
+    const paddingBottom = l.paddingBottom || 0;
+    pushLine(alignText(l.text, charWidth, align), {
+      align,
+      bold: l.bold ?? s.globalBold,
+      doubleHeight: l.doubleHeight ?? s.globalDoubleHeight,
+      fontSize: l.fontSize || 1,
+      paddingTop: l.paddingTop || 0,
+      paddingBottom: l.paddingBottom || 0,
+      dividerBelow: l.dividerBelow
+    });
     if (l.dividerBelow) pushDivider();
   });
   pushSpacing(s.sectionMargin ?? 1);
 
+  // ---- Order info ----
   if (s.showToken !== false) pushLine(`TOKEN: #${order.tokenNo}`);
   if (s.showOrderNo) pushLine(`Order: ${order.orderNo}`);
   pushLine(`Type: ${order.type}${order.table?.name ? ` - ${order.table.name}` : ''}`);
@@ -289,6 +349,7 @@ export function generateReceiptPreviewLines(order, type = 'kitchen', settings, c
   if (isKitchen && order.instructions) pushLine(`Notes: ${order.instructions}`);
   pushSpacing(s.sectionMargin ?? 1);
 
+  // ---- Items ----
   const columns = (s.itemColumns?.length ? s.itemColumns : [
     { key: 'sr', label: 'Sr.', width: 4, align: 'left', visible: true },
     { key: 'name', label: 'Item', width: 20, align: 'left', visible: true },
@@ -325,6 +386,7 @@ export function generateReceiptPreviewLines(order, type = 'kitchen', settings, c
   });
   pushSpacing(s.sectionMargin ?? 1);
 
+  // ---- Totals ----
   if (!isKitchen) {
     if (s.totalsFormat) {
       const formatted = s.totalsFormat
@@ -341,16 +403,28 @@ export function generateReceiptPreviewLines(order, type = 'kitchen', settings, c
   }
   pushSpacing(s.sectionMargin ?? 1);
 
-  if (s.footerLines?.length) {
-    s.footerLines.forEach(l => {
-      if (!l.text) return;
-      const align = l.alignment || baseAlign;
-      pushLine(alignText(l.text, charWidth, align), { align, bold: l.bold ?? s.globalBold, doubleHeight: l.doubleHeight ?? s.globalDoubleHeight });
-      if (l.dividerBelow) pushDivider();
-    });
-  } else {
-    pushLine('Thank you!');
-  }
+  // ---- Footer lines ----
+(s.footerLines || []).forEach(l => {
+  if (!l.text) return;
+  const align = l.alignment || baseAlign;
+  const bold = l.bold ?? s.globalBold;
+  const doubleHeight = l.doubleHeight ?? s.globalDoubleHeight;
+  const fontSize = l.fontSize || 1;
+  const paddingTop = l.paddingTop || 0;
+  const paddingBottom = l.paddingBottom || 0;
+  pushLine(alignText(l.text, charWidth, align), {  // ← FIXED
+    align,
+    bold,
+    doubleHeight,
+    fontSize,
+    paddingTop,
+    paddingBottom,
+    dividerBelow: l.dividerBelow
+  });
+  if (l.dividerBelow) pushDivider();
+});
+
+  if (s.footerLines?.length === 0) pushLine('Thank you!');
 
   return lines;
 }
@@ -361,7 +435,21 @@ export function renderPreviewHTML(lines, fontMultiplier = 1) {
       return `<div style="text-align:center; margin: 2px 0;"><img src="${l.logoUrl}" style="width:${Math.min(l.logoWidth, 240)}px; max-width:100%;" /></div>`;
     }
     const escaped = (l.text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const style = `white-space:pre; margin:0; text-align:${l.align || 'left'}; ${l.bold ? 'font-weight:bold;' : ''} ${l.doubleHeight ? `font-size:${1.7 * fontMultiplier}em; line-height:1.15;` : ''}`;
+    const fm = Math.max(0.5, Math.min(2.0, fontMultiplier || 1));
+    let style = `white-space:pre; margin:0; text-align:${l.align || 'left'};`;
+    if (l.bold) style += ' font-weight:bold;';
+    if (l.doubleHeight) {
+      style += ` font-size:${1.7 * fm}em; line-height:1.15;`;
+    } else {
+      const fs = (l.fontSize || 1) * fm;
+      style += ` font-size:${fs}em;`;
+    }
+    if (l.paddingTop && l.paddingTop > 0) {
+      style += ` margin-top:${l.paddingTop}mm;`;
+    }
+    if (l.paddingBottom && l.paddingBottom > 0) {
+      style += ` margin-bottom:${l.paddingBottom}mm;`;
+    }
     return `<div style="${style}">${escaped || '&nbsp;'}</div>`;
   }).join('');
 }
