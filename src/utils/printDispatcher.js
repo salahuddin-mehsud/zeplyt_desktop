@@ -7,7 +7,6 @@ export async function dispatchPrint(order, type = 'kitchen') {
 
   // ------------------------------------------------------------
   // 1. If this is a web order that already used browser print, skip entirely.
-  //    (The web app already printed via its own browser dialog.)
   // ------------------------------------------------------------
   if (order.printMode === 'browser') {
     console.log('[PRINT] Web order with browser print – skipping on desktop.');
@@ -15,16 +14,14 @@ export async function dispatchPrint(order, type = 'kitchen') {
   }
 
   // ------------------------------------------------------------
-  // 2. Determine if we should force silent printing (web ethernet orders)
+  // 2. Determine printing mode:
+  //    - If order.printMode is 'ethernet' → force silent (web order)
+  //    - If order.printMode is undefined → use desktop's own setting
   // ------------------------------------------------------------
   const isWebEthernet = order.printMode === 'ethernet';
   const useBrowserPrint = localStorage.getItem('useBrowserPrint') === 'true';
 
-  // ------------------------------------------------------------
-  // 3. Browser print path – only if:
-  //    - NOT forced silent (i.e. not a web ethernet order), AND
-  //    - local setting is true (useBrowserPrint)
-  // ------------------------------------------------------------
+  // Browser print path: only if it's NOT a web ethernet order AND the local toggle is ON
   if (!isWebEthernet && useBrowserPrint) {
     console.log('[PRINT] Browser print mode enabled – opening print dialog.');
     let receiptSettings = { bill: null, kitchen: null };
@@ -49,11 +46,11 @@ export async function dispatchPrint(order, type = 'kitchen') {
   }
 
   // ------------------------------------------------------------
-  // 4. Silent printing (Ethernet / Bluetooth)
-  //    This path is used for:
+  // 3. Silent printing (Ethernet / Bluetooth)
+  //    This path covers:
+  //    - Web orders with printMode: 'ethernet' (forced silent)
   //    - Desktop orders when useBrowserPrint is false
-  //    - Web ethernet orders (forced silent)
-  //    - Any other case that falls through
+  //    - Orders with printMode undefined and useBrowserPrint false
   // ------------------------------------------------------------
   console.log('[PRINT] Silent printing (Ethernet/Bluetooth) – for',
     isWebEthernet ? 'web ethernet order' : 'desktop silent order');
