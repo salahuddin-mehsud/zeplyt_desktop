@@ -1,164 +1,104 @@
-// src/pages/Orders.jsx
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
 import PaymentModal from "../components/PaymentModal";
 import * as printer from '../utils/receiptPrinter';
-const { printReceiptHTML, getDefaultReceiptSettings } = printer;
+import { emitPrintOrder } from '../utils/printSocket';
 import { dispatchPrint } from '../utils/printDispatcher';
+// Local helper for cache keys used by the POS screen
+const getCacheKeys = () => ({
+  DINE_IN: 'pos:dine_in_cache',
+  PRODUCTS: 'pos:products_cache',
+  CATEGORIES: 'pos:categories_cache',
+  PAYMENT_METHODS: 'pos:payment_methods_cache',
+});
 
-
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-
-const getCacheKeys = () => {
-  const activeBranchId = localStorage.getItem("activeBranch") || "";
-  const branchSuffix = activeBranchId ? `_${activeBranchId}` : "";
-  return {
-    DINE_IN: `pos_dine_in_cache${branchSuffix}`,
-    PRODUCTS: `pos_products_cache${branchSuffix}`,
-    CATEGORIES: `pos_categories_cache${branchSuffix}`,
-    PAYMENT_METHODS: `pos_payment_methods_cache${branchSuffix}`,
-  };
-};
+// Named helpers from printer
+const { printReceiptHTML, getDefaultReceiptSettings } = printer;
 
 const Orders = () => {
-  const navigate = useNavigate();
-
-  const [orders, setOrders] = useState([]);
-  const [areas, setAreas] = useState([]);
+  // State declarations
   const [tables, setTables] = useState([]);
+  const [areas, setAreas] = useState([]);
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [paymentMethods, setPaymentMethods] = useState([]);
-  const [currentOrderForPayment, setCurrentOrderForPayment] = useState(null);
+  const [deliveryCities, setDeliveryCities] = useState([]);
   const [currencySymbol, setCurrencySymbol] = useState("$");
   const [globalTaxRate, setGlobalTaxRate] = useState(10);
-
-  const [sidebarAreaFilter, setSidebarAreaFilter] = useState("All");
-  const [tableStatusFilter, setTableStatusFilter] = useState("All");
-  const [mainAreaFilter, setMainAreaFilter] = useState("All");
-
-  const [activeTab, setActiveTab] = useState("Open Orders");
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [showPOS, setShowPOS] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState("All");
-  const [modifyingOrder, setModifyingOrder] = useState(null);
-  const [activeOrderId, setActiveOrderId] = useState(null);
-
+  const [orders, setOrders] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchToken, setSearchToken] = useState("");
+  const [activeTab, setActiveTab] = useState("Open Orders");
+  const [mainAreaFilter, setMainAreaFilter] = useState("All");
+  const [tableStatusFilter, setTableStatusFilter] = useState("All");
   const [cart, setCart] = useState([]);
+  const [showPOS, setShowPOS] = useState(false);
+  const [showMobileCart, setShowMobileCart] = useState(false);
+  const [activeOrderId, setActiveOrderId] = useState(null);
   const [formType, setFormType] = useState("Dine In");
-  const [form, setForm] = useState({
-    customerName: "",
-    customerMobile: "",
-    instructions: "",
-    guests: "",
-    area: "",
-    table: "",
-    deliveryAddress: "",
-    driverNotes: "",
-    reservationTime: "",
-  });
-
-  const [deliveryCities, setDeliveryCities] = useState([]);
+  const [form, setForm] = useState({});
   const [selectedCityId, setSelectedCityId] = useState("");
   const [deliveryCost, setDeliveryCost] = useState(0);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modifyingOrder, setModifyingOrder] = useState(null);
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [currentOrderForPayment, setCurrentOrderForPayment] = useState(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [sidebarAreaFilter, setSidebarAreaFilter] = useState("All");
+  const [selectedCategory, setSelectedCategory] = useState("All");
+  const [productSearch, setProductSearch] = useState("");
+
+
+  // Driver selection modal
+const [isDriverModalOpen, setIsDriverModalOpen] = useState(false);
+const [pendingOrderId, setPendingOrderId] = useState(null);
+const [driverList, setDriverList] = useState([]);
+const [selectedDriverId, setSelectedDriverId] = useState('');
+const [otherDriverName, setOtherDriverName] = useState('');
+const [otherDriverPhone, setOtherDriverPhone] = useState('');
+const [driverSearch, setDriverSearch] = useState('');
+
+
+// For driver selection in the Delivery creation modal
+const [deliverySelectedDriverId, setDeliverySelectedDriverId] = useState('');
+const [deliveryOtherDriverName, setDeliveryOtherDriverName] = useState('');
+const [deliveryOtherDriverPhone, setDeliveryOtherDriverPhone] = useState('');
+const [deliveryDriverSearch, setDeliveryDriverSearch] = useState('');
+
+const [cancelModalOpen, setCancelModalOpen] = useState(false);
+const [cancelOrderId, setCancelOrderId] = useState(null);
+const [cancelReason, setCancelReason] = useState("");
+const [cancelStartDate, setCancelStartDate] = useState("");
+const [cancelEndDate, setCancelEndDate] = useState("");
+
+
+  const navigate = useNavigate();
 
   const fetchData = async () => {
     try {
-      const cacheKeys = getCacheKeys();
+      const [dineRes, prodRes, catRes, payRes, ordersRes] = await Promise.all([
+        api.get('/pos/dine-in'),
+        api.get('/pos/products'),
+        api.get('/pos/categories'),
+        api.get('/dashboard/settings/payment-methods'),
+        api.get('/pos/orders'),
+      ]);
 
-      const getCached = (key) => {
-        const cached = localStorage.getItem(key);
-        if (!cached) return null;
-        const { data, timestamp } = JSON.parse(cached);
-        if (Date.now() - timestamp < CACHE_TTL) {
-          return data;
-        }
-        return null;
-      };
+      const dineData = dineRes.data || {};
+      setAreas(dineData.areas || []);
+      setTables(dineData.tables || []);
 
-      const setCached = (key, data) => {
-        localStorage.setItem(
-          key,
-          JSON.stringify({ data, timestamp: Date.now() }),
-        );
-      };
+      setProducts(prodRes.data || []);
+      setCategories(catRes.data || []);
 
-      let dineInData = getCached(cacheKeys.DINE_IN);
-      let productsData = getCached(cacheKeys.PRODUCTS);
-      if (
-        productsData &&
-        productsData.length > 0 &&
-        !productsData.some((p) => p.imageUrl)
-      ) {
-        productsData = null;
-      }
-      let categoriesData = getCached(cacheKeys.CATEGORIES);
-      let paymentMethodsData = getCached(cacheKeys.PAYMENT_METHODS);
+      setPaymentMethods(payRes.data.paymentMethods || []);
 
-      const promises = [];
-      if (!dineInData) promises.push(api.get("/pos/dine-in"));
-      if (!productsData) promises.push(api.get("/pos/products"));
-      if (!categoriesData) promises.push(api.get("/pos/categories"));
-      if (!paymentMethodsData)
-        promises.push(api.get("/dashboard/settings/payment-methods"));
-
-      if (promises.length > 0) {
-        const results = await Promise.all(promises);
-        let idx = 0;
-        if (!dineInData) {
-          dineInData = results[idx++].data;
-          setCached(cacheKeys.DINE_IN, dineInData);
-        }
-        if (!productsData) {
-          productsData = results[idx++].data;
-          setCached(cacheKeys.PRODUCTS, productsData);
-        }
-        if (!categoriesData) {
-          categoriesData = results[idx++].data;
-          setCached(cacheKeys.CATEGORIES, categoriesData);
-        }
-        if (!paymentMethodsData) {
-          paymentMethodsData = results[idx++].data?.paymentMethods || [
-            "CASH",
-            "CARD",
-            "BPAY",
-            "TALABAT",
-            "JAHEZ",
-            "KEETA",
-          ];
-          setCached(cacheKeys.PAYMENT_METHODS, paymentMethodsData);
-        }
-
-        setAreas(dineInData.areas || []);
-        setTables(dineInData.tables || []);
-        setProducts(productsData || []);
-        setCategories(categoriesData || []);
-        setPaymentMethods(paymentMethodsData || []);
-      }
-
-      const ordRes = await api.get("/pos/orders");
-      setOrders(ordRes.data);
-
-      if (dineInData.areas?.length > 0 && !form.area) {
-        setForm((prev) => ({ ...prev, area: dineInData.areas[0]._id }));
-      }
-
-      if (productsData) {
-        const hasImages = productsData.some((p) => p.imageUrl);
-        if (!hasImages) {
-          productsData = null;
-        }
-      }
+      setOrders(ordersRes.data || []);
     } catch (err) {
-      console.error("Error fetching POS data:", err);
+      console.error('Failed to load POS data', err);
     }
   };
-
 
   useEffect(() => {
     const fetchCurrencyAndTax = async () => {
@@ -272,65 +212,116 @@ const Orders = () => {
   const freeTablesCount = totalTablesCount - occupiedTablesCount;
 
   const filteredOrders = orders
-    .filter((o) => {
-      let matchesTab = false;
-      if (activeTab === "Open Orders") {
-        matchesTab = [
-          "Open Orders",
-          "Pending Web Order",
-          "Online Open",
-        ].includes(o.status);
-      } else if (activeTab === "Canceled") {
-        matchesTab = ["Cancelled", "Refunded"].includes(o.status);
-      } else {
-        matchesTab = o.status === activeTab;
+  .filter((o) => {
+    let matchesTab = false;
+    if (activeTab === "Open Orders") {
+      matchesTab = [
+        "Open Orders",
+        "Pending Web Order",
+        "Online Open",
+        "Accepted",
+        "Cooking",
+        "On Way",
+        "Delivered",
+      ].includes(o.status);
+    } else if (activeTab === "Canceled") {
+      matchesTab = ["Cancelled", "Refunded"].includes(o.status);
+      // Apply date range filter for canceled orders
+      if (cancelStartDate) {
+        const start = new Date(cancelStartDate);
+        start.setHours(0,0,0,0);
+        if (new Date(o.createdAt) < start) return false;
       }
-      const q = searchQuery.toLowerCase();
-      const matchesQuery =
-        !q ||
-        (o.customerName && o.customerName.toLowerCase().includes(q)) ||
-        (o.table && o.table.name && o.table.name.toLowerCase().includes(q));
-      const t = searchToken.toLowerCase();
-      const matchesToken =
-        !t ||
-        (o.tokenNo && o.tokenNo.toString().includes(t)) ||
-        (o.orderNo && o.orderNo.toLowerCase().includes(t));
+      if (cancelEndDate) {
+        const end = new Date(cancelEndDate);
+        end.setHours(23,59,59,999);
+        if (new Date(o.createdAt) > end) return false;
+      }
+    } else {
+      matchesTab = o.status === activeTab;
+    }
+    const q = searchQuery.toLowerCase();
+    const matchesQuery =
+      !q ||
+      (o.customerName && o.customerName.toLowerCase().includes(q)) ||
+      (o.table && o.table.name && o.table.name.toLowerCase().includes(q));
+    const t = searchToken.toLowerCase();
+    const matchesToken =
+      !t ||
+      (o.tokenNo && o.tokenNo.toString().includes(t)) ||
+      (o.orderNo && o.orderNo.toLowerCase().includes(t));
 
-      return matchesTab && matchesQuery && matchesToken;
-    })
-    .sort((a, b) => {
-      if (activeTab === "Closed" || activeTab === "Canceled") {
-        return (
-          new Date(b.updatedAt || b.createdAt) -
-          new Date(a.updatedAt || a.createdAt)
-        );
-      }
-      return new Date(b.createdAt) - new Date(a.createdAt);
-    });
+    return matchesTab && matchesQuery && matchesToken;
+  })
+  .sort((a, b) => {
+    if (activeTab === "Closed" || activeTab === "Canceled") {
+      return (
+        new Date(b.updatedAt || b.createdAt) -
+        new Date(a.updatedAt || a.createdAt)
+      );
+    }
+    return new Date(b.createdAt) - new Date(a.createdAt);
+  });
 
   const filteredProducts =
     selectedCategory === "All"
       ? products
       : products.filter((p) => p.category?._id === selectedCategory);
 
+  const posFilteredProducts = products.filter((p) => {
+  const matchesCategory = selectedCategory === "All" || p.category?._id === selectedCategory;
+  const matchesSearch = p.name.toLowerCase().includes(productSearch.toLowerCase());
+  return matchesCategory && matchesSearch;
+});
+
   const openNewOrder = (type, prefilledArea = null, prefilledTable = null) => {
-    setActiveOrderId(null);
-    setFormType(type);
-    setForm({
-      customerName: "",
-      customerMobile: "",
-      instructions: "",
-      guests: "",
-      area: prefilledArea || areas[0]?._id || "",
-      table: prefilledTable || "",
-      deliveryAddress: "",
-      driverNotes: "",
-      reservationTime: "",
-    });
-    setSelectedCityId("");
-    setDeliveryCost(0);
-    setIsModalOpen(true);
-  };
+  setActiveOrderId(null);
+  setFormType(type);
+  setForm({
+    customerName: "",
+    customerMobile: "",
+    instructions: "",
+    guests: "",
+    area: prefilledArea || areas[0]?._id || "",
+    table: prefilledTable || "",
+    deliveryAddress: "",
+    driverNotes: "",
+    reservationTime: "",
+    driverName: "",   // ← new
+    driverPhone: "",  // ← new
+  });
+  setSelectedCityId("");
+  setDeliveryCost(0);
+  setIsModalOpen(true);
+
+  if (type === 'Delivery') {
+    fetchDrivers();
+    setDeliverySelectedDriverId('');
+    setDeliveryOtherDriverName('');
+    setDeliveryOtherDriverPhone('');
+    setDeliveryDriverSearch('');
+  }
+};
+
+
+  const fetchDrivers = async () => {
+  try {
+    const res = await api.get('/staff');
+    const drivers = res.data.filter(emp => emp.role === 'Driver');
+    setDriverList(drivers);
+  } catch (err) {
+    console.error('Failed to fetch drivers', err);
+  }
+};
+
+const handleMarkOnWay = (orderId) => {
+  setPendingOrderId(orderId);
+  fetchDrivers();
+  setSelectedDriverId('');
+  setOtherDriverName('');
+  setOtherDriverPhone('');
+  setIsDriverModalOpen(true);
+};
 
   const handleTableClick = (areaId, tableId) => {
     const existingOrder = orders.find(
@@ -370,54 +361,57 @@ const Orders = () => {
   dispatchPrint(order, type).catch(err => console.error('[PRINT] dispatchPrint failed:', err));
 };
 
+
+
   const fireOrderAndOpenPayment = async () => {
-    if (cart.length === 0)
-      return alert("Cart is empty! Add items before firing.");
+  if (cart.length === 0)
+    return alert("Cart is empty! Add items before firing.");
 
-    const subTotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
-    const taxRate = globalTaxRate;
-    const taxAmount = subTotal * (taxRate / 100);
-    const shippingCost = formType === "Delivery" ? deliveryCost : 0;
-    const finalAmount = subTotal + taxAmount + shippingCost;
+  const subTotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+  const taxRate = globalTaxRate;
+  const taxAmount = subTotal * (taxRate / 100);
+  const shippingCost = formType === "Delivery" ? deliveryCost : 0;
+  const finalAmount = subTotal + taxAmount + shippingCost;
 
-    const items = cart.map((c) => ({
-      product: c._id,
-      name: c.name,
-      qty: c.qty,
-      price: c.price,
-    }));
-    let savedOrder;
+  const items = cart.map((c) => ({
+    product: c._id,
+    name: c.name,
+    qty: c.qty,
+    price: c.price,
+  }));
+  let savedOrder;
 
-    try {
-      if (activeOrderId) {
-        const res = await api.put(`/pos/orders/${activeOrderId}`, {
-          action: "ADD_ITEMS",
-          newItems: items,
-        });
-        savedOrder = res.data;
-      } else {
-        const payload = {
-          ...form,
-          type: formType,
-          items,
-          taxAmount: taxAmount,
-          taxPercentage: taxRate,
-          shippingCost: shippingCost,
-        };
-        const res = await api.post("/pos/orders", payload);
-        savedOrder = res.data;
-      }
-      setCart([]);
-      setShowPOS(false);
-      setActiveOrderId(null);
-      fetchData();
-      setCurrentOrderForPayment(savedOrder);
-      setIsPaymentModalOpen(true);
-    } catch (error) {
-      console.error("Failed to fire order:", error);
-      alert("Failed to send order to kitchen.");
+  try {
+    if (activeOrderId) {
+      const res = await api.put(`/pos/orders/${activeOrderId}`, {
+        action: "ADD_ITEMS",
+        newItems: items,
+      });
+      savedOrder = res.data;
+    } else {
+      const payload = {
+        ...form,
+        type: formType,
+        items,
+        taxAmount: taxAmount,
+        taxPercentage: taxRate,
+        shippingCost: shippingCost,
+      };
+      const res = await api.post("/pos/orders", payload);
+      savedOrder = res.data;
     }
-  };
+    setCart([]);
+    setShowPOS(false);
+    setShowMobileCart(false);
+    setActiveOrderId(null);
+    fetchData();
+    setCurrentOrderForPayment(savedOrder);
+    setIsPaymentModalOpen(true);
+  } catch (error) {
+    console.error("Failed to fire order:", error);
+    alert("Failed to send order to kitchen.");
+  }
+};
 
   const handleFinalizePayment = async (paymentDetails) => {
     if (!currentOrderForPayment || !currentOrderForPayment._id) return;
@@ -428,6 +422,8 @@ const Orders = () => {
       setIsPaymentModalOpen(false);
       setCurrentOrderForPayment(null);
       fetchData();
+      if (paymentDetails.printInvoice) {
+      }
     } catch (err) {
       console.error("Payment failed", err);
       alert("Failed to process payment.");
@@ -437,12 +433,46 @@ const Orders = () => {
   const cancelPOS = () => {
     setCart([]);
     setShowPOS(false);
+    setShowMobileCart(false);
     setActiveOrderId(null);
   };
 
   const updateOrderStatus = async (id, status) => {
     await api.put(`/pos/orders/${id}`, { status });
     fetchData();
+  };
+
+  const getNextWebsiteOrderStatus = (status) => {
+    switch (status) {
+      case "Pending Web Order":
+      case "Online Open":
+        return "Accepted";
+      case "Accepted":
+        return "Cooking";
+      case "Cooking":
+        return "On Way";
+      case "On Way":
+        return "Delivered";
+      default:
+        return null;
+    }
+  };
+
+  const getWebsiteOrderButtonLabel = (status, displayType) => {
+    switch (status) {
+      case "Pending Web Order":
+        return `Accept & Process ${displayType === "QR Menu" ? "QR" : "Web"} Order`;
+      case "Online Open":
+        return `Confirm ${displayType === "QR Menu" ? "QR" : "Web"} Order`;
+      case "Accepted":
+        return "Start Cooking";
+      case "Cooking":
+        return "Mark On Way";
+      case "On Way":
+        return "Mark Delivered";
+      default:
+        return "Update Order";
+    }
   };
 
   const removeOrderItem = async (orderId, itemIndex) => {
@@ -453,17 +483,37 @@ const Orders = () => {
     fetchData();
   };
 
-  const cancelOrder = async (id) => {
-    if (window.confirm("Are you sure you want to cancel this order?")) {
-      await api.put(`/pos/orders/${id}`, { status: "Cancelled" });
-      fetchData();
-    }
-  };
+  const openCancelModal = (orderId) => {
+  setCancelOrderId(orderId);
+  setCancelReason("");
+  setCancelModalOpen(true);
+};
+
+const confirmCancelOrder = async () => {
+  if (!cancelReason.trim()) {
+    alert("Please provide a reason for cancellation.");
+    return;
+  }
+  try {
+    await api.put(`/pos/orders/${cancelOrderId}`, {
+      status: "Cancelled",
+      cancellationReason: cancelReason.trim(),
+    });
+    setCancelModalOpen(false);
+    setCancelOrderId(null);
+    setCancelReason("");
+    fetchData();
+  } catch (err) {
+    console.error("Failed to cancel order:", err);
+    alert("Failed to cancel order.");
+  }
+};
 
   const subTotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
   const taxAmount = subTotal * (globalTaxRate / 100);
   const shippingCostDisplay = formType === "Delivery" ? deliveryCost : 0;
   const total = subTotal + taxAmount + shippingCostDisplay;
+  const cartItemCount = cart.reduce((sum, item) => sum + item.qty, 0);
 
   const getCardStyle = (type, isClosed) => {
     if (isClosed)
@@ -504,15 +554,15 @@ const Orders = () => {
     <div className="fixed inset-0 z-40 bg-gray-50 text-gray-800 font-sans flex overflow-hidden">
       {!showPOS && (
         <>
-          <div className="flex-1 p-4 overflow-y-auto overflow-x-hidden min-w-0">
+          <div className="flex-1 p-3 md:p-4 overflow-y-auto overflow-x-hidden min-w-0">
             <div className="flex items-center gap-3 mb-4">
               <button
                 onClick={() => navigate("/dashboard")}
-                className="text-gray-500 hover:text-gray-700 font-bold text-xs bg-white border border-gray-200 px-3 py-1.5 rounded-lg transition-colors shadow-sm"
+                className="text-gray-500 hover:text-gray-700 font-bold text-xs bg-white border border-gray-200 px-3 py-1.5 rounded-lg transition-colors shadow-sm shrink-0"
               >
                 ← Go Back
               </button>
-              <h1 className="text-lg font-bold tracking-tight">
+              <h1 className="text-base md:text-lg font-bold tracking-tight truncate">
                 Live Orders & POS
               </h1>
             </div>
@@ -523,55 +573,75 @@ const Orders = () => {
                   placeholder="Search Customer or Table..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="bg-gray-50 border border-gray-200 px-3 py-1.5 rounded-lg w-56 outline-none text-xs focus:border-blue-400 transition-colors"
+                  className="bg-gray-50 border border-gray-200 px-3 py-1.5 rounded-lg w-full sm:w-56 outline-none text-xs focus:border-blue-400 transition-colors"
                 />
                 <input
                   type="text"
                   placeholder="Token / Order No"
                   value={searchToken}
                   onChange={(e) => setSearchToken(e.target.value)}
-                  className="bg-gray-50 border border-gray-200 px-3 py-1.5 rounded-lg w-40 outline-none text-xs focus:border-blue-400 transition-colors"
+                  className="bg-gray-50 border border-gray-200 px-3 py-1.5 rounded-lg w-full sm:w-40 outline-none text-xs focus:border-blue-400 transition-colors"
                 />
 
-                <div className="ml-auto flex gap-2">
+                <div className="w-full sm:w-auto sm:ml-auto flex gap-2">
                   <button
                     onClick={() => openNewOrder("Parcel")}
-                    className="bg-teal-100 text-teal-700 border border-teal-200 hover:bg-teal-200 px-4 py-1.5 rounded-lg font-bold text-xs transition-colors"
+                    className="flex-1 sm:flex-none bg-teal-100 text-teal-700 border border-teal-200 hover:bg-teal-200 px-3 sm:px-4 py-1.5 rounded-lg font-bold text-xs transition-colors"
                   >
                     + PARCEL
                   </button>
                   <button
                     onClick={() => openNewOrder("Delivery")}
-                    className="bg-purple-100 text-purple-700 border border-purple-200 hover:bg-purple-200 px-4 py-1.5 rounded-lg font-bold text-xs transition-colors"
+                    className="flex-1 sm:flex-none bg-purple-100 text-purple-700 border border-purple-200 hover:bg-purple-200 px-3 sm:px-4 py-1.5 rounded-lg font-bold text-xs transition-colors"
                   >
                     + DELIVERY
                   </button>
                   <button
                     onClick={() => openNewOrder("Dine In")}
-                    className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-1.5 rounded-lg font-bold text-xs transition-colors"
+                    className="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-500 text-white px-3 sm:px-5 py-1.5 rounded-lg font-bold text-xs transition-colors"
                   >
                     NEW DINE-IN
                   </button>
                 </div>
               </div>
 
-              <div className="flex gap-5 border-b border-gray-200 mb-4 text-xs font-bold text-gray-400 overflow-x-auto hide-scrollbar">
-                {[
-                  "Open Orders",
-                  "Closed",
-                  "Outstanding Payment",
-                  "Canceled",
-                  "Table View",
-                ].map((tab) => (
-                  <button
-                    key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    className={`shrink-0 pb-2 uppercase tracking-wider transition-colors ${activeTab === tab ? "text-blue-600 border-b-2 border-blue-500" : "hover:text-gray-600"}`}
-                  >
-                    {tab}
-                  </button>
-                ))}
-              </div>
+             <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 mb-4 pb-2">
+  <div className="flex gap-5 text-xs font-bold text-gray-400 overflow-x-auto hide-scrollbar">
+    {["Open Orders", "Closed", "Outstanding Payment", "Canceled", "Table View"].map((tab) => (
+      <button
+        key={tab}
+        onClick={() => setActiveTab(tab)}
+        className={`shrink-0 pb-2 uppercase tracking-wider transition-colors ${activeTab === tab ? "text-blue-600 border-b-2 border-blue-500" : "hover:text-gray-600"}`}
+      >
+        {tab}
+      </button>
+    ))}
+  </div>
+
+  {activeTab === "Canceled" && (
+    <div className="flex items-center gap-2 ml-auto">
+      <input
+        type="date"
+        value={cancelStartDate}
+        onChange={(e) => setCancelStartDate(e.target.value)}
+        className="bg-gray-50 border border-gray-200 rounded px-2 py-1 text-[10px] text-gray-700 outline-none focus:border-blue-400"
+      />
+      <span className="text-gray-400 text-[10px]">to</span>
+      <input
+        type="date"
+        value={cancelEndDate}
+        onChange={(e) => setCancelEndDate(e.target.value)}
+        className="bg-gray-50 border border-gray-200 rounded px-2 py-1 text-[10px] text-gray-700 outline-none focus:border-blue-400"
+      />
+      <button
+        onClick={() => { setCancelStartDate(""); setCancelEndDate(""); }}
+        className="px-2 py-1 text-[10px] font-bold text-gray-400 hover:text-gray-600 transition-colors"
+      >
+        Clear
+      </button>
+    </div>
+  )}
+</div>
 
               {activeTab === "Table View" ? (
                 <div className="flex flex-col gap-4 pb-16">
@@ -793,7 +863,7 @@ const Orders = () => {
                                         >
                                           + Add
                                         </button>
-                                       <button
+                                      <button
   onClick={() => triggerPrint(activeOrder, 'kitchen')}
   className="flex-1 py-1.5 bg-gray-50 hover:bg-gray-100 text-[9px] font-bold text-gray-600 hover:text-gray-800 uppercase transition-none"
 >
@@ -1055,22 +1125,27 @@ const Orders = () => {
                               </span>
                             </div>
                             <div>
-                              <p className="font-bold text-gray-800 text-xs truncate max-w-[120px]">
-                                {order.customerName ||
-                                  (order.type === "Dine In" ||
-                                  order.type === "Reservation"
-                                    ? order.table?.name || "Walk-In"
-                                    : "DELIVERY")}
-                              </p>
-                              <p className="text-gray-400 text-[10px] font-mono mt-0.5">
-                                {new Date(order.createdAt).toLocaleDateString()}{" "}
-                                •{" "}
-                                {new Date(order.createdAt).toLocaleTimeString(
-                                  [],
-                                  { hour: "2-digit", minute: "2-digit" },
-                                )}
-                              </p>
-                            </div>
+  <p className="font-bold text-gray-800 text-xs truncate max-w-[120px]">
+    {order.customerName ||
+      (order.type === "Dine In" ||
+      order.type === "Reservation"
+        ? order.table?.name || "Walk-In"
+        : "DELIVERY")}
+  </p>
+  <p className="text-gray-400 text-[10px] font-mono mt-0.5">
+    {new Date(order.createdAt).toLocaleDateString()}{" "}
+    •{" "}
+    {new Date(order.createdAt).toLocaleTimeString(
+      [],
+      { hour: "2-digit", minute: "2-digit" },
+    )}
+  </p>
+  {order.cancellationReason && (
+    <p className="text-[10px] text-red-500 mt-1">
+      Reason: {order.cancellationReason}
+    </p>
+  )}
+</div>
                           </div>
 
                           <div className="flex-1 text-gray-500 text-[10px] truncate px-2 hidden md:block max-w-xl">
@@ -1095,22 +1170,25 @@ const Orders = () => {
                               </p>
                             </div>
 
-                            <div className="flex flex-col gap-1 border-l border-gray-200 pl-3">
-                              <button
-                                onClick={() => triggerPrint(order)}
-                                className="text-[9px] font-bold uppercase tracking-wider text-blue-600 hover:text-gray-800 transition-colors"
-                              >
-                                Print
-                              </button>
-                              <button
-                                onClick={() =>
-                                  updateOrderStatus(order._id, "Open Orders")
-                                }
-                                className="text-[9px] font-bold uppercase tracking-wider text-amber-600 hover:text-gray-800 transition-colors"
-                              >
-                                ⟲ Reopen
-                              </button>
-                            </div>
+                            {order.status !== 'Cancelled' && order.status !== 'Refunded' && (
+  <div className="flex flex-col gap-1 border-l border-gray-200 pl-3">
+    <button
+      onClick={() => triggerPrint(order)}
+      className="text-[9px] font-bold uppercase tracking-wider text-blue-600 hover:text-gray-800 transition-colors"
+    >
+      Print
+    </button>
+    <button
+      onClick={() => updateOrderStatus(order._id, "Open Orders")}
+      className="text-[9px] font-bold uppercase tracking-wider text-amber-600 hover:text-gray-800 transition-colors"
+    >
+      ⟲ Reopen
+    </button>
+  </div>
+)}
+
+
+
                           </div>
                         </div>
                       );
@@ -1141,7 +1219,7 @@ const Orders = () => {
                                 : "DELIVERY"}
                             </span>
                             <button
-                              onClick={() => cancelOrder(order._id)}
+                              onClick={() => openCancelModal(order._id)}
                               className="text-gray-400 hover:bg-red-100 hover:text-red-600 px-1.5 py-0.5 rounded transition-colors text-xs"
                               title="Cancel Order"
                             >
@@ -1260,90 +1338,94 @@ const Orders = () => {
                           </div>
 
                           <div className="mt-auto">
-  {order.status === "Pending Web Order" ? (
-    // Pending Web Order – single button
-    <button
-      onClick={() => {
-        updateOrderStatus(order._id, "Online Open");
-        triggerPrint(order);
-      }}
-      className={`w-full py-1.5 rounded text-[9px] font-bold tracking-widest uppercase border transition-colors ${
-        displayType === "QR Menu"
-          ? "bg-pink-100 text-pink-700 border-pink-200 hover:bg-pink-200"
-          : "bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200"
-      }`}
-    >
-      Accept & Process {displayType === "QR Menu" ? "QR" : "Web"} Order
-    </button>
-  ) : (
-    // Normal open order – 4‑col grid + full‑width payment
-    <div className="grid grid-cols-4 gap-1.5">
-      {/* Modify button */}
-      <button
-        onClick={() =>
-          setModifyingOrder(modifyingOrder === order._id ? null : order._id)
-        }
-        className={`py-1.5 rounded text-[9px] font-bold tracking-widest uppercase transition-colors border ${
-          modifyingOrder === order._id
-            ? "bg-gray-200 text-gray-800 border-gray-300"
-            : "bg-white border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-gray-300"
-        }`}
-      >
-        {modifyingOrder === order._id ? "Done" : "Modify"}
-      </button>
-
-      {/* + Add button */}
+ 
+   {['Pending Web Order', 'Online Open', 'Accepted', 'Cooking', 'On Way'].includes(order.status) && (
+    <div className="mb-2">
       <button
         onClick={() => {
-          setActiveOrderId(order._id);
-          setFormType(order.type);
-          proceedToPOS();
+          if (order.status === 'Cooking' && order.type === 'Delivery') {
+            handleMarkOnWay(order._id);
+          } else {
+            const nextStatus = getNextWebsiteOrderStatus(order.status);
+            if (nextStatus) updateOrderStatus(order._id, nextStatus);
+          }
         }}
-        className="py-1.5 rounded text-[9px] font-bold tracking-widest uppercase bg-white border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-gray-300 transition-colors"
+        className={`w-full py-1.5 rounded text-[9px] font-bold tracking-widest uppercase border transition-colors ${
+          displayType === "QR Menu"
+            ? "bg-pink-100 text-pink-700 border-pink-200 hover:bg-pink-200"
+            : "bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200"
+        }`}
       >
-        + Add
+        {getWebsiteOrderButtonLabel(order.status, displayType)}
       </button>
-
-      {/* KOT button */}
-      <button
-        onClick={() => triggerPrint(order, "kitchen")}
-        className="py-1.5 rounded text-[9px] font-bold tracking-widest uppercase bg-white border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-gray-300 transition-colors"
-      >
-        KOT
-      </button>
-
-      {/* Bill button */}
-      <button
-        onClick={() => triggerPrint(order, "bill")}
-        className="py-1.5 rounded text-[9px] font-bold tracking-widest uppercase bg-white border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-gray-300 transition-colors"
-      >
-        Bill
-      </button>
-
-      {/* Full‑width Pay / Complete */}
-      {order.paymentMode ? (
-        <button
-          onClick={() => updateOrderStatus(order._id, "Closed")}
-          className="col-span-4 py-1.5 rounded text-[9px] font-bold tracking-widest uppercase bg-emerald-100 text-emerald-700 border border-emerald-200 hover:bg-emerald-200 transition-colors"
-        >
-          Complete
-        </button>
-      ) : (
-        <button
-          onClick={() => {
-            setCurrentOrderForPayment(order);
-            setIsPaymentModalOpen(true);
-          }}
-          className="col-span-4 py-1.5 rounded text-[9px] font-bold tracking-widest uppercase bg-blue-100 text-blue-700 border border-blue-200 hover:bg-blue-200 transition-colors"
-        >
-          Pay
-        </button>
-      )}
     </div>
   )}
+
+  {/* Always show the POS action grid so users can Modify / + Add / KOT / Bill / Pay */}
+  <div className="grid grid-cols-4 gap-1.5">
+    {/* Modify button */}
+    <button
+      onClick={() =>
+        setModifyingOrder(modifyingOrder === order._id ? null : order._id)
+      }
+      className={`py-1.5 rounded text-[9px] font-bold tracking-widest uppercase transition-colors border ${
+        modifyingOrder === order._id
+          ? "bg-gray-200 text-gray-800 border-gray-300"
+          : "bg-white border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-gray-300"
+      }`}
+    >
+      {modifyingOrder === order._id ? "Done" : "Modify"}
+    </button>
+
+    {/* + Add button */}
+    <button
+      onClick={() => {
+        setActiveOrderId(order._id);
+        setFormType(order.type);
+        proceedToPOS();
+      }}
+      className="py-1.5 rounded text-[9px] font-bold tracking-widest uppercase bg-white border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-gray-300 transition-colors"
+    >
+      + Add
+    </button>
+
+    {/* KOT button */}
+    <button
+      onClick={() => triggerPrint(order, "kitchen")}
+      className="py-1.5 rounded text-[9px] font-bold tracking-widest uppercase bg-white border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-gray-300 transition-colors"
+    >
+      KOT
+    </button>
+
+    {/* Bill button */}
+    <button
+      onClick={() => triggerPrint(order, "bill")}
+      className="py-1.5 rounded text-[9px] font-bold tracking-widest uppercase bg-white border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-gray-300 transition-colors"
+    >
+      Bill
+    </button>
+
+    {/* Full‑width Pay / Complete */}
+    {order.paymentMode ? (
+      <button
+        onClick={() => updateOrderStatus(order._id, "Closed")}
+        className="col-span-4 py-1.5 rounded text-[9px] font-bold tracking-widest uppercase bg-emerald-100 text-emerald-700 border border-emerald-200 hover:bg-emerald-200 transition-colors"
+      >
+        Complete
+      </button>
+    ) : (
+      <button
+        onClick={() => {
+          setCurrentOrderForPayment(order);
+          setIsPaymentModalOpen(true);
+        }}
+        className="col-span-4 py-1.5 rounded text-[9px] font-bold tracking-widest uppercase bg-blue-100 text-blue-700 border border-blue-200 hover:bg-blue-200 transition-colors"
+      >
+        Pay
+      </button>
+    )}
+  </div>
 </div>
-
-
                         </div>
                       </div>
                     );
@@ -1368,9 +1450,21 @@ const Orders = () => {
             </div>
           </div>
 
-          {/* Sidebar Panel */}
+          {/* Backdrop for the table-list side panel on mobile, where it opens full-screen */}
+          {isSidebarOpen && (
+            <div
+              className="md:hidden fixed inset-0 bg-black/40 z-[65]"
+              onClick={() => setIsSidebarOpen(false)}
+            />
+          )}
+
+          {/* Sidebar Panel — full-screen overlay on mobile, fixed 280px pane on md+ */}
           <div
-            className={`shrink-0 bg-white border-l border-gray-200 h-full flex flex-col transition-all duration-200 ease-out ${isSidebarOpen ? "w-[280px]" : "w-0 overflow-hidden border-none"}`}
+            className={`shrink-0 bg-white border-l border-gray-200 h-full flex flex-col transition-all duration-200 ease-out
+              ${isSidebarOpen
+                ? "fixed inset-0 z-[70] w-full md:static md:z-auto md:w-[280px]"
+                : "w-0 overflow-hidden border-none"
+              }`}
           >
             <div className="p-3 flex items-center justify-between border-b border-gray-200">
               <select
@@ -1536,9 +1630,9 @@ const Orders = () => {
 
       {/* Create Order Modal */}
       {isModalOpen && !showPOS && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white border border-gray-200 rounded-xl w-full max-w-2xl overflow-hidden shadow-lg">
-            <div className="flex justify-between items-center p-4 border-b border-gray-200">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4">
+          <div className="bg-white border border-gray-200 rounded-xl w-full max-w-2xl overflow-hidden shadow-lg max-h-[95vh] flex flex-col">
+            <div className="flex justify-between items-center p-4 border-b border-gray-200 shrink-0">
               <h2 className="text-base font-bold text-gray-800">
                 Start New {formType} Order
               </h2>
@@ -1550,9 +1644,9 @@ const Orders = () => {
               </button>
             </div>
 
-            <div className="p-5 space-y-4 text-sm">
-              <div className="flex items-center gap-5 pb-3 border-b border-gray-200">
-                <span className="font-bold text-gray-500 uppercase tracking-wider text-[10px]">
+            <div className="p-4 sm:p-5 space-y-4 text-sm overflow-y-auto">
+              <div className="flex flex-wrap items-center gap-3 sm:gap-5 pb-3 border-b border-gray-200">
+                <span className="font-bold text-gray-500 uppercase tracking-wider text-[10px] w-full sm:w-auto">
                   Type:
                 </span>
                 <label className="flex items-center gap-1.5 cursor-pointer font-bold text-xs">
@@ -1593,7 +1687,7 @@ const Orders = () => {
                 </label>
               </div>
 
-              <div className="grid grid-cols-[110px_1fr] items-center gap-3 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-[110px_1fr] items-center gap-2 sm:gap-3 text-xs">
                 <label className="text-gray-500 text-[10px] font-bold uppercase tracking-wider">
                   Full Name
                 </label>
@@ -1635,7 +1729,7 @@ const Orders = () => {
               </div>
 
               {formType === "Dine In" || formType === "Reservation" ? (
-                <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 mt-1">
+                <div className="bg-blue-50 p-3 sm:p-4 rounded-xl border border-blue-100 mt-1">
                   {formType === "Reservation" && (
                     <div className="mb-3 pb-3 border-b border-blue-100">
                       <label className="text-blue-600 text-[10px] font-bold uppercase tracking-wider block mb-1">
@@ -1679,7 +1773,7 @@ const Orders = () => {
                     <span className="text-gray-500 text-[10px] font-bold uppercase tracking-wider block mb-1.5">
                       Table
                     </span>
-                    <div className="grid grid-cols-4 md:grid-cols-6 gap-1.5">
+                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-1.5">
                       {availableTables.length === 0 ? (
                         <p className="text-gray-400 text-xs col-span-full">
                           No tables found.
@@ -1699,7 +1793,7 @@ const Orders = () => {
                   </div>
                 </div>
               ) : formType === "Delivery" ? (
-                <div className="bg-purple-50 p-4 rounded-xl border border-purple-100 mt-1 space-y-3">
+                <div className="bg-purple-50 p-3 sm:p-4 rounded-xl border border-purple-100 mt-1 space-y-3">
                   <div>
                     <label className="text-purple-600 text-[10px] font-bold uppercase tracking-wider block mb-1">
                       Delivery City
@@ -1746,6 +1840,99 @@ const Orders = () => {
                       }
                     />
                   </div>
+                  {/* Driver selection */}
+<div>
+  <label className="text-purple-600 text-[10px] font-bold uppercase tracking-wider block mb-1">
+    Assign Driver (Optional)
+  </label>
+  <div className="space-y-2">
+    <input
+      type="text"
+      placeholder="Search drivers..."
+      value={deliveryDriverSearch}
+      onChange={(e) => setDeliveryDriverSearch(e.target.value)}
+      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700 outline-none focus:border-purple-400"
+    />
+    <div className="max-h-32 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+      {driverList
+        .filter(d => d.name.toLowerCase().includes(deliveryDriverSearch.toLowerCase()))
+        .map(driver => (
+          <label key={driver._id} className="flex items-center gap-2 p-2 hover:bg-gray-50 cursor-pointer">
+            <input
+              type="radio"
+              name="deliveryDriver"
+              value={driver._id}
+              checked={deliverySelectedDriverId === driver._id}
+              onChange={() => {
+                setDeliverySelectedDriverId(driver._id);
+                setDeliveryOtherDriverName('');
+                setDeliveryOtherDriverPhone('');
+                setForm(prev => ({
+                  ...prev,
+                  driverName: driver.name,
+                  driverPhone: driver.contact || '',
+                }));
+              }}
+            />
+            <span className="text-xs font-medium">{driver.name}</span>
+            <span className="text-[10px] text-gray-500 ml-auto">{driver.contact || 'No phone'}</span>
+          </label>
+        ))}
+      {driverList.length === 0 && (
+        <p className="p-2 text-xs text-gray-400">No drivers found.</p>
+      )}
+    </div>
+    <label className="flex items-center gap-2 cursor-pointer">
+      <input
+        type="radio"
+        name="deliveryDriver"
+        value="other"
+        checked={deliverySelectedDriverId === 'other'}
+        onChange={() => {
+          setDeliverySelectedDriverId('other');
+          setDeliveryOtherDriverName('');
+          setDeliveryOtherDriverPhone('');
+          setForm(prev => ({
+            ...prev,
+            driverName: '',
+            driverPhone: '',
+          }));
+        }}
+      />
+      <span className="text-xs font-bold">Other (External Driver)</span>
+    </label>
+    {deliverySelectedDriverId === 'other' && (
+      <div className="grid grid-cols-2 gap-2">
+        <input
+          type="text"
+          placeholder="Driver Name"
+          value={deliveryOtherDriverName}
+          onChange={(e) => {
+            setDeliveryOtherDriverName(e.target.value);
+            setForm(prev => ({
+              ...prev,
+              driverName: e.target.value,
+            }));
+          }}
+          className="bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700 outline-none focus:border-purple-400"
+        />
+        <input
+          type="text"
+          placeholder="Phone Number"
+          value={deliveryOtherDriverPhone}
+          onChange={(e) => {
+            setDeliveryOtherDriverPhone(e.target.value);
+            setForm(prev => ({
+              ...prev,
+              driverPhone: e.target.value,
+            }));
+          }}
+          className="bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700 outline-none focus:border-purple-400"
+        />
+      </div>
+    )}
+  </div>
+</div>
                   {selectedCityId && deliveryCost > 0 && (
                     <div className="text-purple-700 text-xs font-medium">
                       Delivery Cost: {currencySymbol}
@@ -1754,7 +1941,7 @@ const Orders = () => {
                   )}
                 </div>
               ) : (
-                <div className="bg-teal-50 p-4 rounded-xl border border-teal-100 mt-1">
+                <div className="bg-teal-50 p-3 sm:p-4 rounded-xl border border-teal-100 mt-1">
                   <p className="text-xs text-gray-500">
                     Parcel orders are for takeaway. No address needed.
                   </p>
@@ -1762,7 +1949,7 @@ const Orders = () => {
               )}
             </div>
 
-            <div className="p-4 border-t border-gray-200 flex gap-3 bg-gray-50">
+            <div className="p-4 border-t border-gray-200 flex gap-3 bg-gray-50 shrink-0">
               <button
                 onClick={proceedToPOS}
                 className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-lg font-bold text-sm transition-colors"
@@ -1784,14 +1971,14 @@ const Orders = () => {
       {showPOS && (
         <div className="fixed inset-0 z-50 bg-white text-gray-800 flex flex-col">
           <div className="border-b border-gray-200 p-3 flex justify-between items-center bg-white shrink-0">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               <button
                 onClick={cancelPOS}
-                className="text-gray-500 hover:text-gray-700 font-bold text-xs bg-gray-100 px-3 py-1.5 rounded-lg transition-colors"
+                className="text-gray-500 hover:text-gray-700 font-bold text-xs bg-gray-100 px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors shrink-0"
               >
-                ← Cancel & Back
+                ← Cancel
               </button>
-              <h1 className="text-base font-bold tracking-tight">
+              <h1 className="text-sm sm:text-base font-bold tracking-tight truncate">
                 {activeOrderId
                   ? "Add Items to Existing Ticket"
                   : `Create New ${formType} Order`}
@@ -1799,52 +1986,72 @@ const Orders = () => {
             </div>
             <button
               onClick={() => document.documentElement.requestFullscreen()}
-              className="text-gray-500 hover:text-gray-700 bg-gray-100 px-3 py-1.5 rounded-lg text-xs font-bold"
+              className="hidden sm:inline-block text-gray-500 hover:text-gray-700 bg-gray-100 px-3 py-1.5 rounded-lg text-xs font-bold shrink-0"
             >
               ⛶ Fullscreen
             </button>
           </div>
 
-          <div className="flex flex-1 overflow-hidden p-4 gap-4">
-            <div className="flex flex-col flex-1 bg-white border border-gray-200 rounded-xl p-4 overflow-hidden shadow-sm">
-              <div className="flex gap-2 mb-3 overflow-x-auto hide-scrollbar pb-1 shrink-0 border-b border-gray-200">
-                <button
-                  onClick={() => setSelectedCategory("All")}
-                  className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold transition-colors ${selectedCategory === "All" ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200"}`}
-                >
-                  All Items
-                </button>
-                {categories.map((c) => (
-                  <button
-                    key={c._id}
-                    onClick={() => setSelectedCategory(c._id)}
-                    className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold transition-colors ${selectedCategory === c._id ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200"}`}
-                  >
-                    {c.name}
-                  </button>
-                ))}
-              </div>
+          <div className="flex flex-col md:flex-row flex-1 overflow-hidden p-2 md:p-4 gap-3 md:gap-4 min-h-0">
+            {/* Products panel */}
+            <div className="flex flex-col flex-1 bg-white border border-gray-200 rounded-xl p-3 md:p-4 overflow-hidden shadow-sm min-h-0">
+              <div className="flex flex-wrap items-center gap-2 mb-3 border-b border-gray-200 pb-2">
+  <div className="relative flex-1 min-w-[150px]">
+    <input
+      type="text"
+      placeholder="Search products..."
+      value={productSearch}
+      onChange={(e) => setProductSearch(e.target.value)}
+      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-800 outline-none focus:border-blue-400 transition-colors"
+    />
+  </div>
+  <div className="flex gap-1 overflow-x-auto hide-scrollbar flex-nowrap">
+    <button
+      onClick={() => setSelectedCategory("All")}
+      className={`shrink-0 px-3 py-1 rounded-full text-[10px] font-bold transition-colors whitespace-nowrap ${
+        selectedCategory === "All"
+          ? "bg-blue-600 text-white"
+          : "bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200"
+      }`}
+    >
+      All
+    </button>
+    {categories.map((c) => (
+      <button
+        key={c._id}
+        onClick={() => setSelectedCategory(c._id)}
+        className={`shrink-0 px-3 py-1 rounded-full text-[10px] font-bold transition-colors whitespace-nowrap ${
+          selectedCategory === c._id
+            ? "bg-blue-600 text-white"
+            : "bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200"
+        }`}
+      >
+        {c.name}
+      </button>
+    ))}
+  </div>
+</div>
 
-              <div className="grid grid-cols-3 xl:grid-cols-4 gap-3 overflow-y-auto pr-1 content-start">
-                {filteredProducts.length === 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5 md:gap-3 overflow-y-auto pr-1 content-start pb-24 md:pb-0">
+                {posFilteredProducts.length === 0 && (
                   <p className="text-gray-400 col-span-full text-center py-6 text-xs">
                     No items available.
                   </p>
                 )}
-                {filteredProducts.map((p) => (
+                {posFilteredProducts.map((p) => (
                   <div
                     key={p._id}
                     onClick={() => addToCart(p)}
-                    className="bg-gray-50 hover:border-blue-400 border border-gray-200 p-3 rounded-xl cursor-pointer transition-all flex flex-col items-center gap-1.5 h-40 group shadow-sm"
+                    className="bg-gray-50 hover:border-blue-400 border border-gray-200 p-2.5 md:p-3 rounded-xl cursor-pointer transition-all flex flex-col items-center gap-1.5 h-36 md:h-40 group shadow-sm"
                   >
                     {p.imageUrl ? (
                       <img
                         src={p.imageUrl}
                         alt={p.name}
-                        className="w-14 h-14 object-cover rounded-full border border-gray-200"
+                        className="w-12 h-12 md:w-14 md:h-14 object-cover rounded-full border border-gray-200"
                       />
                     ) : (
-                      <div className="w-14 h-14 rounded-full bg-gray-200 flex items-center justify-center text-gray-400 text-[10px]">
+                      <div className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-gray-200 flex items-center justify-center text-gray-400 text-[10px]">
                         No img
                       </div>
                     )}
@@ -1852,7 +2059,7 @@ const Orders = () => {
                       {p.name}
                     </span>
                     <span className="text-blue-600 font-bold text-xs">
-                      {currencySymbol} {" "}
+                      {currencySymbol}
                       {p.price.toFixed(2)}
                     </span>
                   </div>
@@ -1860,8 +2067,27 @@ const Orders = () => {
               </div>
             </div>
 
-            <div className="w-80 bg-white border border-gray-200 rounded-xl p-4 flex flex-col shrink-0 shadow-sm">
-              <div className="mb-3 flex justify-between items-start">
+            {/* Cart panel — normal column on md+, bottom-sheet overlay on mobile */}
+            <div
+              className={`
+                ${showMobileCart ? "fixed inset-0 z-[80] flex" : "hidden"}
+                md:flex md:static md:z-auto
+                flex-col bg-white border border-gray-200 md:rounded-xl p-4 shadow-sm
+                w-full md:w-80 md:shrink-0
+              `}
+            >
+              {/* Mobile-only header with close button */}
+              <div className="flex md:hidden justify-between items-center mb-3 pb-3 border-b border-gray-200 shrink-0">
+                <h2 className="text-sm font-bold text-gray-800">Current Ticket</h2>
+                <button
+                  onClick={() => setShowMobileCart(false)}
+                  className="text-gray-400 hover:bg-gray-100 hover:text-gray-700 w-8 h-8 rounded-lg flex items-center justify-center text-lg font-bold transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="mb-3 hidden md:flex justify-between items-start">
                 <h2 className="text-sm font-bold text-gray-800">
                   Current Ticket
                 </h2>
@@ -1877,7 +2103,7 @@ const Orders = () => {
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+              <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-0">
                 {cart.map((item, idx) => (
                   <div
                     key={idx}
@@ -1950,6 +2176,22 @@ const Orders = () => {
                 </button>
               </div>
             </div>
+
+            {/* Floating "view cart" button — mobile only, hidden once the sheet is open */}
+            {!showMobileCart && (
+              <button
+                onClick={() => setShowMobileCart(true)}
+                className="md:hidden fixed bottom-4 left-4 right-4 z-[75] bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl shadow-lg flex justify-between items-center px-5 transition-colors"
+              >
+                <span className="text-sm">
+                  🛒 {cartItemCount} item{cartItemCount !== 1 ? "s" : ""}
+                </span>
+                <span className="text-sm font-mono">
+                  {currencySymbol}
+                  {total.toFixed(2)}
+                </span>
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -1964,6 +2206,170 @@ const Orders = () => {
         onProcessPayment={handleFinalizePayment}
         orderData={currentOrderForPayment}
       />
+
+      {/* Cancellation Reason Modal */}
+{cancelModalOpen && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div className="bg-white border border-gray-200 rounded-xl max-w-md w-full p-6 shadow-xl">
+      <h3 className="text-base font-bold text-gray-800 mb-2">Cancel Order</h3>
+      <p className="text-xs text-gray-500 mb-4">Please provide a reason for cancelling this order.</p>
+      <textarea
+        value={cancelReason}
+        onChange={(e) => setCancelReason(e.target.value)}
+        placeholder="Enter cancellation reason..."
+        className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 outline-none focus:border-red-400 transition-colors resize-none h-20"
+        autoFocus
+      />
+      <div className="flex gap-2 mt-4 justify-end">
+        <button
+          onClick={() => setCancelModalOpen(false)}
+          className="px-4 py-2 text-xs font-bold bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={confirmCancelOrder}
+          className="px-4 py-2 text-xs font-bold bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+        >
+          Confirm Cancellation
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
+{/* Driver Assignment Modal */}
+{isDriverModalOpen && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl border border-gray-200">
+      <h3 className="text-base font-bold text-gray-800 mb-2">Assign Delivery Driver</h3>
+      <p className="text-xs text-gray-500 mb-4">
+        Select a driver for this delivery order, or enter an external driver.
+      </p>
+
+      <div className="space-y-3">
+        <div>
+          <label className="text-[10px] text-gray-500 uppercase font-bold block mb-1">
+            Search Drivers
+          </label>
+          <input
+            type="text"
+            placeholder="Type to filter drivers..."
+            value={driverSearch}
+            onChange={(e) => setDriverSearch(e.target.value)}
+            className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-blue-400"
+          />
+        </div>
+
+        <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+          {driverList
+            .filter(d => d.name.toLowerCase().includes(driverSearch.toLowerCase()))
+            .map(driver => (
+              <label key={driver._id} className="flex items-center gap-2 p-2 hover:bg-gray-50 cursor-pointer">
+                <input
+                  type="radio"
+                  name="driver"
+                  value={driver._id}
+                  checked={selectedDriverId === driver._id}
+                  onChange={() => {
+                    setSelectedDriverId(driver._id);
+                    setOtherDriverName('');
+                    setOtherDriverPhone('');
+                  }}
+                />
+                <span className="text-xs font-medium">{driver.name}</span>
+                <span className="text-[10px] text-gray-500 ml-auto">{driver.contact || 'No phone'}</span>
+              </label>
+            ))}
+          {driverList.length === 0 && (
+            <p className="p-2 text-xs text-gray-400">No drivers found. Add a driver in Staff Management.</p>
+          )}
+        </div>
+
+        <div className="border-t border-gray-200 pt-3">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="driver"
+              value="other"
+              checked={selectedDriverId === 'other'}
+              onChange={() => {
+                setSelectedDriverId('other');
+                setOtherDriverName('');
+                setOtherDriverPhone('');
+              }}
+            />
+            <span className="text-xs font-bold">Other (External Driver)</span>
+          </label>
+          {selectedDriverId === 'other' && (
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              <input
+                type="text"
+                placeholder="Driver Name"
+                value={otherDriverName}
+                onChange={(e) => setOtherDriverName(e.target.value)}
+                className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-blue-400"
+              />
+              <input
+                type="text"
+                placeholder="Phone Number"
+                value={otherDriverPhone}
+                onChange={(e) => setOtherDriverPhone(e.target.value)}
+                className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-blue-400"
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex gap-2 mt-6 justify-end">
+        <button
+          onClick={() => setIsDriverModalOpen(false)}
+          className="px-4 py-2 text-xs font-bold bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={async () => {
+            let driverName = '';
+            let driverPhone = '';
+            if (selectedDriverId === 'other') {
+              driverName = otherDriverName.trim();
+              driverPhone = otherDriverPhone.trim();
+              if (!driverName) {
+                alert('Please enter driver name.');
+                return;
+              }
+            } else if (selectedDriverId) {
+              const driver = driverList.find(d => d._id === selectedDriverId);
+              if (driver) {
+                driverName = driver.name;
+                driverPhone = driver.contact || '';
+              }
+            } else {
+              alert('Please select a driver.');
+              return;
+            }
+            // Update order status to On Way with driver info
+            await api.put(`/pos/orders/${pendingOrderId}`, {
+              status: 'On Way',
+              driverName,
+              driverPhone,
+            });
+            fetchData();
+            setIsDriverModalOpen(false);
+            setPendingOrderId(null);
+          }}
+          className="px-4 py-2 text-xs font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-500"
+        >
+          Confirm & Mark On Way
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
+
     </div>
   );
 };

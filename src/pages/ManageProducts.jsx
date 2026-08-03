@@ -8,6 +8,7 @@ const ManageProducts = () => {
   const [currencySymbol, setCurrencySymbol] = useState('$');
   const [form, setForm] = useState({
     name: '',
+    description: '',
     price: '',
     category: '',
     image: null,
@@ -59,6 +60,7 @@ const ManageProducts = () => {
   const resetForm = () => {
   setForm({
     name: '',
+    description: '',
     price: '',
     category: '',
     image: null,
@@ -79,6 +81,7 @@ const ManageProducts = () => {
   const formData = new FormData();
   formData.append('name', form.name);
   formData.append('price', form.price);
+  formData.append('description', form.description);
   formData.append('category', form.category);
   formData.append('discountEnabled', form.discountEnabled);
   formData.append('discountType', form.discountType);
@@ -113,6 +116,7 @@ const ManageProducts = () => {
   const handleEditClick = (p) => {
     setForm({
       name: p.name,
+      description: p.description || '',
       price: p.price,
       category: p.category?._id || '',
       image: null,
@@ -194,6 +198,17 @@ const ManageProducts = () => {
                 <img src={form.imagePreview} alt="Preview" className="w-8 h-8 object-cover rounded border border-gray-200" />
               )}
             </div>
+
+<div className="md:col-span-3">
+  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">Description</label>
+  <textarea
+    rows="3"
+    placeholder="Describe the dish, ingredients, serving style..."
+    value={form.description}
+    onChange={(e) => setForm({ ...form, description: e.target.value })}
+    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-blue-400"
+  />
+</div>
 
             {/* Stock Control */}
             <div className="md:col-span-3 flex flex-wrap items-center gap-3 mt-1">

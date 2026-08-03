@@ -1,9 +1,10 @@
 // src/services/api.js
 import axios from 'axios';
 
-console.log('🔍 VITE_API_URL:', import.meta.env.VITE_API_URL);
+const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+console.log('🔍 VITE_API_URL:', import.meta.env.VITE_API_URL, '=> using baseURL:', baseURL);
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
+  baseURL,
 });
 
 // Public routes that don't need authentication

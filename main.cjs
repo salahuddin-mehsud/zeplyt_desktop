@@ -17,6 +17,25 @@ app.disableHardwareAcceleration();
 const MAX_LINE_WIDTH = 48;
 const BOTTOM_MARGIN_LINES = 4;
 
+
+
+function wrapText(text, maxWidth) {
+  const lines = [];
+  let currentLine = '';
+  const words = text.trim().split(/\s+/);
+  for (const word of words) {
+    if ((currentLine + ' ' + word).length <= maxWidth) {
+      currentLine += (currentLine ? ' ' : '') + word;
+    } else {
+      if (currentLine) lines.push(currentLine);
+      currentLine = word;
+    }
+  }
+  if (currentLine) lines.push(currentLine);
+  return lines;
+}
+
+
 // ---- Ensure any string fits the line width ----
 function fitLine(str, maxWidth) {
   str = String(str ?? '');
@@ -38,15 +57,18 @@ function padColumn(str, width, align) {
 
 // ---- Software alignment for whole lines (no reliance on ESC/POS align command) ----
 function padLine(str, align, width = MAX_LINE_WIDTH) {
-  str = fitLine(str, width);
+  str = String(str ?? '');
+  if (str.length > width) str = str.slice(0, width);
   if (align === 'center') {
     const left = Math.floor((width - str.length) / 2);
-    return ' '.repeat(Math.max(0, left)) + str;
+    const right = width - str.length - left;
+    return ' '.repeat(Math.max(0, left)) + str + ' '.repeat(Math.max(0, right));
   }
   if (align === 'right') {
     return ' '.repeat(Math.max(0, width - str.length)) + str;
   }
-  return str; // left
+  // Left align – pad to full width
+  return str + ' '.repeat(Math.max(0, width - str.length));
 }
 
 // ---- Feed line (LF only — no CR, avoids this printer's double line-advance) ----
@@ -204,6 +226,21 @@ async function generateEscPos(order, type, settings) {
     rawText(encoder, padLine(`Guest: ${order.customerName || 'Walk-in'}`, baseAlign));
     feed(encoder);
   }
+ if (order.deliveryAddress) {
+  const addressLines = wrapText(order.deliveryAddress, MAX_LINE_WIDTH);
+  if (addressLines.length > 0) {
+    rawText(encoder, padLine(`Address: ${addressLines[0]}`, baseAlign));
+    feed(encoder);
+    for (let i = 1; i < addressLines.length; i++) {
+      rawText(encoder, padLine(`         ${addressLines[i]}`, baseAlign));
+      feed(encoder);
+    }
+  }
+}
+if (order.type === 'Delivery' && order.driver && order.driver.name) {
+  rawText(encoder, padLine(`Driver: ${order.driver.name}  ${order.driver.phone || ''}`, baseAlign));
+  feed(encoder);
+}
   if (isKitchen && order.instructions) {
     rawText(encoder, padLine(`Notes: ${order.instructions}`, baseAlign));
     feed(encoder);
@@ -267,27 +304,47 @@ async function generateEscPos(order, type, settings) {
     printSpacing(s.sectionMargin ?? 1);
   }
 
-  // ---- Totals ----
+    // ---- Totals ----
   if (!isKitchen) {
+    const deliveryFee = Number(order.shippingCost ?? order.deliveryFee ?? 0);
+const discountAmount = Number(order.discountAmount ?? 0);
+
     if (s.totalsFormat) {
-      const formatted = s.totalsFormat
+      let formatted = s.totalsFormat
         .replace(/{subtotal}/g, (order.subTotal ?? 0).toFixed(s.decimalPlaces ?? 2))
         .replace(/{tax}/g, (order.taxAmount ?? 0).toFixed(s.decimalPlaces ?? 2))
-        .replace(/{discount}/g, (order.discountAmount ?? 0).toFixed(s.decimalPlaces ?? 2))
+        .replace(/{discount}/g, discountAmount.toFixed(s.decimalPlaces ?? 2))
+        .replace(/{delivery}/g, deliveryFee.toFixed(s.decimalPlaces ?? 2))
         .replace(/{total}/g, (order.finalAmount ?? 0).toFixed(s.decimalPlaces ?? 2));
-      formatted.split('\n').forEach(line => {
-        if (line.trim()) {
-          rawText(encoder, padLine(line, baseAlign));
-          feed(encoder);
-        }
+
+      // Filter out lines that contain Discount: 0.xxx or Delivery: 0.xxx, or delivery when order type isn't Delivery
+      const lines = formatted.split('\n').filter(line => {
+        const trimmed = line.trim().toLowerCase();
+        if (!trimmed) return false;
+        if (trimmed.includes('discount') && discountAmount === 0) return false;
+        if (trimmed.includes('delivery') && (deliveryFee === 0 || order.type !== 'Delivery')) return false;
+        return true;
+      });
+      lines.forEach(line => {
+        rawText(encoder, padLine(line, baseAlign));
+        feed(encoder);
       });
     } else {
+      // Fallback: show only if values are positive (and delivery only for Delivery orders)
       if (s.showSubtotal !== false) {
         rawText(encoder, padLine(`Subtotal: ${(order.subTotal ?? 0).toFixed(s.decimalPlaces ?? 2)}`, baseAlign));
         feed(encoder);
       }
       if (s.showTax !== false) {
         rawText(encoder, padLine(`Tax (${order.taxPercentage || 10}%): ${(order.taxAmount ?? 0).toFixed(s.decimalPlaces ?? 2)}`, baseAlign));
+        feed(encoder);
+      }
+      if (discountAmount > 0) {
+        rawText(encoder, padLine(`Discount: ${discountAmount.toFixed(s.decimalPlaces ?? 2)}`, baseAlign));
+        feed(encoder);
+      }
+      if (deliveryFee > 0 && order.type === 'Delivery') {
+        rawText(encoder, padLine(`Delivery: ${deliveryFee.toFixed(s.decimalPlaces ?? 2)}`, baseAlign));
         feed(encoder);
       }
       if (s.showTotal !== false) {

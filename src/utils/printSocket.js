@@ -47,6 +47,14 @@ export function connectPrintSocket() {
   });
 }
 
+export function emitPrintOrder(order, printType) {
+  if (!socket) {
+    console.warn('[SOCKET] Not connected, cannot emit print_order.');
+    return;
+  }
+  socket.emit('print_order', { order, printType });
+}
+
 export function disconnectPrintSocket() {
   socket?.disconnect();
   socket = null;

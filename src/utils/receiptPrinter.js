@@ -1,5 +1,22 @@
 import api from '../services/api';
 
+
+function wrapTextForHtml(text, maxChars = 42) {
+  const lines = [];
+  let currentLine = '';
+  const words = text.trim().split(/\s+/);
+  for (const word of words) {
+    if ((currentLine + ' ' + word).length <= maxChars) {
+      currentLine += (currentLine ? ' ' : '') + word;
+    } else {
+      if (currentLine) lines.push(currentLine);
+      currentLine = word;
+    }
+  }
+  if (currentLine) lines.push(currentLine);
+  return lines;
+}
+
 function renderLine(lineObj, globalAlignment, globalBold, globalDoubleHeight) {
   if (!lineObj || !lineObj.text) return '';
   const align = lineObj.alignment || globalAlignment || 'left';
@@ -38,22 +55,30 @@ function formatItemLine(item, format, decimalPlaces) {
 }
 
 export function generateReceiptHTML(order, type = 'kitchen', settings) {
+  console.log('[RECEIPT] Full order object:', JSON.stringify(order, null, 2));
+
   const { tokenNo, orderNo, type: orderType, table, customerName, createdAt, items, subTotal, taxAmount, discountAmount, finalAmount, instructions } = order;
 
+  // ---- Delivery address ----
+  let deliveryAddress = order.deliveryAddress || order.delivery_address || '';
+  if (!deliveryAddress && order.deliveryLocation) {
+    deliveryAddress = order.deliveryLocation.address || order.deliveryLocation.name || '';
+  }
 
+  const addressLines = deliveryAddress ? wrapTextForHtml(deliveryAddress, 42) : [];
 
-function replacePlaceholders(text, order, table, orderType) {
-  return (text || '')
-    .replace(/{token}/g, order.tokenNo ?? '')
-    .replace(/{orderNo}/g, order.orderNo ?? '')
-    .replace(/{type}/g, orderType || '')
-    .replace(/{table}/g, table?.name ?? '')
-    .replace(/{customer}/g, order.customerName || 'Walk-in')
-    .replace(/{guest}/g, order.customerName || 'Walk-in')
-    .replace(/{date}/g, new Date(order.createdAt).toLocaleDateString())
-    .replace(/{time}/g, new Date(order.createdAt).toLocaleTimeString())
-    .replace(/{datetime}/g, new Date(order.createdAt).toLocaleString());
-}
+  function replacePlaceholders(text, order, table, orderType) {
+    return (text || '')
+      .replace(/{token}/g, order.tokenNo ?? '')
+      .replace(/{orderNo}/g, order.orderNo ?? '')
+      .replace(/{type}/g, orderType || '')
+      .replace(/{table}/g, table?.name ?? '')
+      .replace(/{customer}/g, order.customerName || 'Walk-in')
+      .replace(/{guest}/g, order.customerName || 'Walk-in')
+      .replace(/{date}/g, new Date(order.createdAt).toLocaleDateString())
+      .replace(/{time}/g, new Date(order.createdAt).toLocaleTimeString())
+      .replace(/{datetime}/g, new Date(order.createdAt).toLocaleString());
+  }
 
   if (!settings) {
     settings = {
@@ -69,7 +94,7 @@ function replacePlaceholders(text, order, table, orderType) {
         { key: 'amount', label: 'Amt', align: 'right', visible: true },
       ],
       itemFormat: '{name}  {qty} x {price} = {total}',
-      totalsFormat: 'Subtotal: {subtotal}\nTax: {tax}\nTotal: {total}',
+      totalsFormat: 'Subtotal: {subtotal}\nTax: {tax}\nDelivery: {delivery}\nTotal: {total}',
       decimalPlaces: type === 'kitchen' ? 0 : 2,
       fontMultiplier: 1,
       sectionMargin: 1,
@@ -92,37 +117,30 @@ function replacePlaceholders(text, order, table, orderType) {
     price: 15,
     amount: 25,
   };
-  // For kitchen, we use only sr, name, qty – adjust proportions
   const kitchenWidths = {
     sr: 10,
     name: 70,
     qty: 20,
   };
 
-  // Get visible columns, use settings widths if provided, else fallback
   let cols = itemColumns.length ? itemColumns : getDefaultColumns(type);
   if (type === 'kitchen') {
     cols = cols.filter(col => col.key !== 'price' && col.key !== 'amount');
   }
   const visibleCols = cols.filter(c => c.visible !== false);
 
-  // Assign width percentages
   const widths = type === 'kitchen' ? kitchenWidths : defaultWidths;
   let totalWidth = 0;
   const colsWithWidth = visibleCols.map(col => {
     let w = col.width && col.width > 0 ? col.width : (widths[col.key] || 10);
-    // Convert to percentage; if width is numeric but less than 100, treat as percentage already (if > 1)
-    // But our defaults are percentages, so use as is.
     totalWidth += w;
     return { ...col, width: w };
   });
-  // Normalize so they sum to 100
   const normalized = colsWithWidth.map(col => ({
     ...col,
     pct: ((col.width / totalWidth) * 100).toFixed(2)
   }));
 
-  // Build item rows
   const itemsRowsHTML = items.map((item, idx) => {
     const cells = normalized.map(col => {
       let val = '';
@@ -143,20 +161,45 @@ function replacePlaceholders(text, order, table, orderType) {
     `<th style="padding:0; text-align:${col.align || 'left'}; width:${col.pct}%;">${col.label}</th>`
   ).join('');
 
-  // Totals lines – no extra padding, full width
-  const totalsHTML = (totalsFormat || '')
-    .replace(/{subtotal}/g, (subTotal ?? 0).toFixed(decimalPlaces))
-    .replace(/{tax}/g, (taxAmount ?? 0).toFixed(decimalPlaces))
-    .replace(/{discount}/g, (discountAmount ?? 0).toFixed(decimalPlaces))
-    .replace(/{total}/g, (finalAmount ?? 0).toFixed(decimalPlaces))
-    .split('\n')
-    .filter(l => l.trim())
-    .map(l => `<p style="margin:0; padding:0; white-space:pre;">${l}</p>`)
+  const deliveryFee = Number(order.shippingCost ?? order.deliveryFee ?? 0);
+  const finalDiscountAmount = Number(discountAmount ?? 0);
+  const subtotal = Number(subTotal ?? 0);
+  const tax = Number(taxAmount ?? 0);
+  const total = Number(finalAmount ?? 0);
+
+  // Build totals lines manually
+  const totalLines = [];
+
+  // Always include subtotal
+  totalLines.push(`Subtotal: ${subtotal.toFixed(decimalPlaces)}`);
+
+  // Tax – only if showTax is true (default is true)
+  if (showTax !== false) {   // ✅ FIXED: use showTax, not s.showTax
+    totalLines.push(`Tax: ${tax.toFixed(decimalPlaces)}`);
+  }
+
+  // Discount – only if > 0
+  if (finalDiscountAmount > 0) {
+    totalLines.push(`Discount: ${finalDiscountAmount.toFixed(decimalPlaces)}`);
+  }
+
+  // Delivery – only if > 0 AND order is Delivery
+  if (deliveryFee > 0 && order.type === 'Delivery') {
+    totalLines.push(`Delivery: ${deliveryFee.toFixed(decimalPlaces)}`);
+  }
+
+  // Total – always
+  totalLines.push(`Total: ${total.toFixed(decimalPlaces)}`);
+
+  const totalsHTML = totalLines
+    .map(line => `<p style="margin:0; padding:0; white-space:pre;">${line}</p>`)
     .join('');
 
   const fm = Math.max(0.5, Math.min(2.0, fontMultiplier || 1));
 
-  // Build full HTML with explicit body and container styling
+  // Determine label for customer: "Customer:" for Delivery, else "Guest:"
+  const customerLabel = orderType === 'Delivery' ? 'Customer:' : 'Guest:';
+
   const html = `
     <div style="font-family: monospace; width:100%; margin:0; padding:0; box-sizing:border-box; font-size:${fm}em;">
       <div style="text-align:center;">
@@ -174,7 +217,9 @@ function replacePlaceholders(text, order, table, orderType) {
       ${showOrderNo ? `<p style="margin:0; padding:0;">Order: ${orderNo}</p>` : ''}
       <p style="margin:0; padding:0;">Type: ${orderType} ${table?.name ? `- ${table.name}` : ''}</p>
       ${showDateTime !== false ? `<p style="margin:0; padding:0;">${type === 'kitchen' ? 'Time' : 'Date'}: ${type === 'kitchen' ? new Date(createdAt).toLocaleTimeString() : new Date(createdAt).toLocaleString()}</p>` : ''}
-      ${showCustomerName !== false ? `<p style="margin:0; padding:0;">${type === 'kitchen' ? '' : 'Guest:'} ${customerName || 'Walk-in'}</p>` : ''}
+      ${showCustomerName !== false ? `<p style="margin:0; padding:0;">${customerLabel} ${customerName || 'Walk-in'}</p>` : ''}
+      ${addressLines.length > 0 ? `<p style="margin:0; padding:0;">Address: ${addressLines[0]}</p>` : ''}
+${addressLines.slice(1).map(line => `<p style="margin:0; padding:0; padding-left: 2em;">${line}</p>`).join('')}
       ${showDivider !== false ? '<hr style="margin:0.5mm 0; border:0; border-top:1px solid #000;"/>' : ''}
 
       <table style="width:100%; border-collapse:collapse; table-layout:fixed; margin:0; padding:0; font-size:${fm}em;">
@@ -188,7 +233,7 @@ function replacePlaceholders(text, order, table, orderType) {
       ${type !== 'kitchen' ? totalsHTML : ''}
       ${type !== 'kitchen' && showTotal !== false && !totalsFormat ? `<p style="margin:0; padding:0; font-weight:bold;">TOTAL: ${(finalAmount ?? 0).toFixed(decimalPlaces)}</p>` : ''}
 
-            <div style="text-align:center; margin:0; padding:0;">
+      <div style="text-align:center; margin:0; padding:0;">
         ${footerLines.map(l => {
           const processedLine = {
             ...l,
@@ -196,12 +241,10 @@ function replacePlaceholders(text, order, table, orderType) {
           };
           return renderLine(processedLine, globalAlignment, globalBold, globalDoubleHeight);
         }).join('')}
-        <!-- 🔒 HARDCODED FOOTER: Powered by ZEPLYT POS -->
         <p style="text-align:center; margin:0; padding:0; font-size:${fm}em; font-weight:normal;">Powered by ZEPLYT POS</p>
       </div>
   `;
 
-  // 🔍 LOG the HTML so you can inspect it in the browser console
   console.log('[RECEIPT] Generated HTML:\n', html);
   return html;
 }
@@ -278,16 +321,15 @@ export function printReceiptHTML(order, type, settings) {
     }, 2000);
   };
 
-  // Use a one-time event listener
   iframe.addEventListener('load', printAndCleanup, { once: true });
 
-  // Fallback: if onload doesn't fire within 1 second, trigger print anyway
   setTimeout(() => {
     if (!printed && iframe.contentWindow) {
       printAndCleanup();
     }
   }, 1000);
 }
+
 function alignText(text, width, align = 'left') {
   text = String(text ?? '');
   if (text.length > width) text = text.slice(0, width);
@@ -315,7 +357,6 @@ export function generateReceiptPreviewLines(order, type = 'kitchen', settings, c
 
   if (s.logoUrl) lines.push({ isLogo: true, logoUrl: s.logoUrl, logoWidth: s.logoWidth || 192 });
 
-  // ---- Header lines ----
   (s.headerLines || []).forEach(l => {
     if (!l.text) return;
     const align = l.alignment || baseAlign;
@@ -337,7 +378,6 @@ export function generateReceiptPreviewLines(order, type = 'kitchen', settings, c
   });
   pushSpacing(s.sectionMargin ?? 1);
 
-  // ---- Order info ----
   if (s.showToken !== false) pushLine(`TOKEN: #${order.tokenNo}`);
   if (s.showOrderNo) pushLine(`Order: ${order.orderNo}`);
   pushLine(`Type: ${order.type}${order.table?.name ? ` - ${order.table.name}` : ''}`);
@@ -345,11 +385,19 @@ export function generateReceiptPreviewLines(order, type = 'kitchen', settings, c
     const dt = isKitchen ? new Date(order.createdAt).toLocaleTimeString() : new Date(order.createdAt).toLocaleString();
     pushLine(`${isKitchen ? 'Time' : 'Date'}: ${dt}`);
   }
-  if (s.showCustomerName !== false) pushLine(`Guest: ${order.customerName || 'Walk-in'}`);
+  if (s.showCustomerName !== false) {
+    const label = order.type === 'Delivery' ? 'Customer:' : 'Guest:';
+    pushLine(`${label} ${order.customerName || 'Walk-in'}`);
+  }
+  if (order.deliveryAddress) {
+  const addressLines = wrapTextForHtml(order.deliveryAddress, charWidth);
+  addressLines.forEach((line, idx) => {
+    pushLine(idx === 0 ? `Address: ${line}` : `         ${line}`);
+  });
+}
   if (isKitchen && order.instructions) pushLine(`Notes: ${order.instructions}`);
   pushSpacing(s.sectionMargin ?? 1);
 
-  // ---- Items ----
   const columns = (s.itemColumns?.length ? s.itemColumns : [
     { key: 'sr', label: 'Sr.', width: 4, align: 'left', visible: true },
     { key: 'name', label: 'Item', width: 20, align: 'left', visible: true },
@@ -386,43 +434,56 @@ export function generateReceiptPreviewLines(order, type = 'kitchen', settings, c
   });
   pushSpacing(s.sectionMargin ?? 1);
 
-  // ---- Totals ----
-  if (!isKitchen) {
+    if (!isKitchen) {
+    const deliveryFee = Number(order.shippingCost ?? order.deliveryFee ?? 0);
+    const discountAmount = Number(order.discountAmount ?? 0);
+
     if (s.totalsFormat) {
-      const formatted = s.totalsFormat
+      let formatted = s.totalsFormat
         .replace(/{subtotal}/g, (order.subTotal ?? 0).toFixed(s.decimalPlaces ?? 2))
         .replace(/{tax}/g, (order.taxAmount ?? 0).toFixed(s.decimalPlaces ?? 2))
-        .replace(/{discount}/g, (order.discountAmount ?? 0).toFixed(s.decimalPlaces ?? 2))
+        .replace(/{discount}/g, discountAmount.toFixed(s.decimalPlaces ?? 2))
+        .replace(/{delivery}/g, deliveryFee.toFixed(s.decimalPlaces ?? 2))
         .replace(/{total}/g, (order.finalAmount ?? 0).toFixed(s.decimalPlaces ?? 2));
-      formatted.split('\n').forEach(l => { if (l.trim()) pushLine(l); });
+      formatted.split('\n')
+        .filter(l => {
+          const trimmed = l.trim();
+          if (!trimmed) return false;
+          if (trimmed.includes('Discount:') && discountAmount === 0) return false;
+          if (trimmed.includes('Delivery:') && (deliveryFee === 0 || order.type !== 'Delivery')) return false;
+          return true;
+        })
+        .forEach(l => pushLine(l));
     } else {
+      // Fallback – conditionally show lines
       if (s.showSubtotal !== false) pushLine(`Subtotal: ${(order.subTotal ?? 0).toFixed(s.decimalPlaces ?? 2)}`);
       if (s.showTax !== false) pushLine(`Tax (${order.taxPercentage || 10}%): ${(order.taxAmount ?? 0).toFixed(s.decimalPlaces ?? 2)}`);
+      if (discountAmount > 0) pushLine(`Discount: ${discountAmount.toFixed(s.decimalPlaces ?? 2)}`);
+      if (deliveryFee > 0 && order.type === 'Delivery') pushLine(`Delivery: ${deliveryFee.toFixed(s.decimalPlaces ?? 2)}`);
       if (s.showTotal !== false) pushLine(`TOTAL: ${(order.finalAmount ?? 0).toFixed(s.decimalPlaces ?? 2)}`, { bold: true });
     }
   }
   pushSpacing(s.sectionMargin ?? 1);
 
-  // ---- Footer lines ----
-(s.footerLines || []).forEach(l => {
-  if (!l.text) return;
-  const align = l.alignment || baseAlign;
-  const bold = l.bold ?? s.globalBold;
-  const doubleHeight = l.doubleHeight ?? s.globalDoubleHeight;
-  const fontSize = l.fontSize || 1;
-  const paddingTop = l.paddingTop || 0;
-  const paddingBottom = l.paddingBottom || 0;
-  pushLine(alignText(l.text, charWidth, align), {  // ← FIXED
-    align,
-    bold,
-    doubleHeight,
-    fontSize,
-    paddingTop,
-    paddingBottom,
-    dividerBelow: l.dividerBelow
+  (s.footerLines || []).forEach(l => {
+    if (!l.text) return;
+    const align = l.alignment || baseAlign;
+    const bold = l.bold ?? s.globalBold;
+    const doubleHeight = l.doubleHeight ?? s.globalDoubleHeight;
+    const fontSize = l.fontSize || 1;
+    const paddingTop = l.paddingTop || 0;
+    const paddingBottom = l.paddingBottom || 0;
+    pushLine(alignText(l.text, charWidth, align), {
+      align,
+      bold,
+      doubleHeight,
+      fontSize,
+      paddingTop,
+      paddingBottom,
+      dividerBelow: l.dividerBelow
+    });
+    if (l.dividerBelow) pushDivider();
   });
-  if (l.dividerBelow) pushDivider();
-});
 
   if (s.footerLines?.length === 0) pushLine('Thank you!');
 
