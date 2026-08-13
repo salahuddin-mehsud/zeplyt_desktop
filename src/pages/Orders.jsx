@@ -73,6 +73,10 @@ const [cancelStartDate, setCancelStartDate] = useState("");
 const [cancelEndDate, setCancelEndDate] = useState("");
 
 
+
+const [viewDetailsModalOpen, setViewDetailsModalOpen] = useState(false);
+const [viewDetailsOrder, setViewDetailsOrder] = useState(null);
+
   const navigate = useNavigate();
 
   const fetchData = async () => {
@@ -549,6 +553,14 @@ const confirmCancelOrder = async () => {
     const city = deliveryCities.find((c) => c._id === cityId);
     setDeliveryCost(city ? city.deliveryCost : 0);
   };
+
+
+const openViewDetails = (order) => {
+  setViewDetailsOrder(order);
+  setViewDetailsModalOpen(true);
+};
+
+
 
   return (
     <div className="fixed inset-0 z-40 bg-gray-50 text-gray-800 font-sans flex overflow-hidden">
@@ -1218,6 +1230,13 @@ const confirmCancelOrder = async () => {
                                 ? order.table?.name || "Walk-In"
                                 : "DELIVERY"}
                             </span>
+<button
+  onClick={() => openViewDetails(order)}
+  className="text-gray-400 hover:bg-blue-100 hover:text-blue-600 px-1.5 py-0.5 rounded transition-colors text-xs"
+  title="View Details"
+>
+  🔍
+</button>
                             <button
                               onClick={() => openCancelModal(order._id)}
                               className="text-gray-400 hover:bg-red-100 hover:text-red-600 px-1.5 py-0.5 rounded transition-colors text-xs"
@@ -2369,6 +2388,147 @@ const confirmCancelOrder = async () => {
   </div>
 )}
 
+
+{/* 👇 NEW: View Details Modal */}
+{viewDetailsModalOpen && viewDetailsOrder && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+    <div className="bg-white rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl border border-gray-200">
+      <div className="flex justify-between items-center border-b border-gray-200 pb-3 mb-4">
+        <h2 className="text-base font-bold text-gray-800">Order Details</h2>
+        <button
+          onClick={() => setViewDetailsModalOpen(false)}
+          className="text-gray-400 hover:text-gray-600 text-xl font-bold"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+        {/* Left Column */}
+        <div className="space-y-2">
+          <div>
+            <span className="text-[10px] text-gray-400 uppercase font-bold block">Order #</span>
+            <span className="font-bold text-gray-800">{viewDetailsOrder.orderNo}</span>
+          </div>
+          <div>
+            <span className="text-[10px] text-gray-400 uppercase font-bold block">Token</span>
+            <span className="font-mono font-bold">#{viewDetailsOrder.tokenNo}</span>
+          </div>
+          <div>
+            <span className="text-[10px] text-gray-400 uppercase font-bold block">Status</span>
+            <span className={`font-bold ${viewDetailsOrder.status === 'Cancelled' || viewDetailsOrder.status === 'Refunded' ? 'text-red-500' : viewDetailsOrder.status === 'Closed' ? 'text-green-600' : 'text-blue-600'}`}>
+              {viewDetailsOrder.status}
+            </span>
+          </div>
+          <div>
+            <span className="text-[10px] text-gray-400 uppercase font-bold block">Type</span>
+            <span className="font-medium">{viewDetailsOrder.type}</span>
+          </div>
+          <div>
+            <span className="text-[10px] text-gray-400 uppercase font-bold block">Customer</span>
+            <span className="font-medium">{viewDetailsOrder.customerName || 'N/A'}</span>
+          </div>
+          <div>
+            <span className="text-[10px] text-gray-400 uppercase font-bold block">Mobile</span>
+            <span className="font-medium">{viewDetailsOrder.customerMobile || 'N/A'}</span>
+          </div>
+          {viewDetailsOrder.deliveryAddress && (
+            <div>
+              <span className="text-[10px] text-gray-400 uppercase font-bold block">Delivery Address</span>
+              <span className="font-medium">{viewDetailsOrder.deliveryAddress}</span>
+            </div>
+          )}
+          {viewDetailsOrder.area && (
+            <div>
+              <span className="text-[10px] text-gray-400 uppercase font-bold block">Area</span>
+              <span className="font-medium">{viewDetailsOrder.area?.name || viewDetailsOrder.area}</span>
+            </div>
+          )}
+          {viewDetailsOrder.table && (
+            <div>
+              <span className="text-[10px] text-gray-400 uppercase font-bold block">Table</span>
+              <span className="font-medium">{viewDetailsOrder.table?.name || viewDetailsOrder.table}</span>
+            </div>
+          )}
+          {viewDetailsOrder.reservationTime && (
+            <div>
+              <span className="text-[10px] text-gray-400 uppercase font-bold block">Reservation Time</span>
+              <span className="font-medium">{new Date(viewDetailsOrder.reservationTime).toLocaleString()}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Right Column */}
+        <div className="space-y-2">
+          {viewDetailsOrder.instructions && (
+            <div>
+              <span className="text-[10px] text-gray-400 uppercase font-bold block">Special Instructions</span>
+              <span className="font-medium text-gray-700">{viewDetailsOrder.instructions}</span>
+            </div>
+          )}
+          {viewDetailsOrder.driverNotes && (
+            <div>
+              <span className="text-[10px] text-gray-400 uppercase font-bold block">Driver Notes</span>
+              <span className="font-medium text-gray-700">{viewDetailsOrder.driverNotes}</span>
+            </div>
+          )}
+          {viewDetailsOrder.driver && viewDetailsOrder.driver.name && (
+            <div>
+              <span className="text-[10px] text-gray-400 uppercase font-bold block">Driver</span>
+              <span className="font-medium">{viewDetailsOrder.driver.name} {viewDetailsOrder.driver.phone && `(${viewDetailsOrder.driver.phone})`}</span>
+            </div>
+          )}
+          <div>
+            <span className="text-[10px] text-gray-400 uppercase font-bold block">Items</span>
+            <ul className="list-disc list-inside mt-1 space-y-0.5">
+              {viewDetailsOrder.items.map((item, i) => (
+                <li key={i} className="text-gray-700">
+                  {item.qty}x {item.name} – {viewDetailsOrder.currencySymbol || '$'}{(item.price * item.qty).toFixed(2)}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="pt-2 border-t border-gray-200 space-y-0.5">
+            {viewDetailsOrder.subTotal !== undefined && (
+              <div className="flex justify-between text-gray-600">
+                <span>Subtotal</span>
+                <span className="font-mono">{(viewDetailsOrder.currencySymbol || '$')}{viewDetailsOrder.subTotal.toFixed(2)}</span>
+              </div>
+            )}
+            {viewDetailsOrder.taxAmount > 0 && (
+              <div className="flex justify-between text-gray-600">
+                <span>Tax ({viewDetailsOrder.taxPercentage || globalTaxRate}%)</span>
+                <span className="font-mono">{(viewDetailsOrder.currencySymbol || '$')}{viewDetailsOrder.taxAmount.toFixed(2)}</span>
+              </div>
+            )}
+            {viewDetailsOrder.shippingCost > 0 && (
+              <div className="flex justify-between text-purple-600">
+                <span>Shipping</span>
+                <span className="font-mono">{(viewDetailsOrder.currencySymbol || '$')}{viewDetailsOrder.shippingCost.toFixed(2)}</span>
+              </div>
+            )}
+            <div className="flex justify-between font-bold text-gray-800 pt-1 border-t border-gray-200">
+              <span>Total</span>
+              <span className="font-mono">{(viewDetailsOrder.currencySymbol || '$')}{viewDetailsOrder.finalAmount.toFixed(2)}</span>
+            </div>
+          </div>
+          {viewDetailsOrder.paymentMode && (
+            <div>
+              <span className="text-[10px] text-gray-400 uppercase font-bold block">Payment</span>
+              <span className="font-medium">{viewDetailsOrder.paymentMode}</span>
+            </div>
+          )}
+          {viewDetailsOrder.createdAt && (
+            <div>
+              <span className="text-[10px] text-gray-400 uppercase font-bold block">Created</span>
+              <span className="font-medium">{new Date(viewDetailsOrder.createdAt).toLocaleString()}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  </div>
+)}
 
     </div>
   );
