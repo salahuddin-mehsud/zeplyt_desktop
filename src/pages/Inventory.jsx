@@ -1,8 +1,10 @@
 // src/pages/Inventory.jsx
 import { useEffect, useState } from 'react';
 import api from '../services/api';
+import useCurrency from '../hooks/useCurrency';
 
 const Inventory = () => {
+  const { currencySymbol } = useCurrency();
   const [activeTab, setActiveTab] = useState('STOCK'); 
   
   // Stock State
@@ -158,7 +160,7 @@ const Inventory = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div className="bg-white border border-gray-200 p-4 rounded-xl">
           <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest mb-0.5">Total Asset Value</p>
-          <p className="text-2xl font-mono font-bold text-green-600">BHD {totalValue.toFixed(3)}</p>
+          <p className="text-2xl font-mono font-bold text-green-600">{currencySymbol} {totalValue.toFixed(3)}</p>
         </div>
         <div className="bg-white border border-gray-200 p-4 rounded-xl">
           <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest mb-0.5">Items Tracked</p>
@@ -204,7 +206,7 @@ const Inventory = () => {
                 </select>
               </div>
               <div className="flex gap-2">
-                <input type="number" step="0.001" placeholder="Cost per Unit (BHD)" required value={form.unitCost} onChange={e => setForm({...form, unitCost: e.target.value})} className="w-1/2 bg-gray-100 border border-gray-300 rounded-lg px-3 py-2 outline-none focus:border-blue-500 text-sm" />
+                <input type="number" step="0.001" placeholder={`Cost per Unit (${currencySymbol})`} required value={form.unitCost} onChange={e => setForm({...form, unitCost: e.target.value})} className="w-1/2 bg-gray-100 border border-gray-300 rounded-lg px-3 py-2 outline-none focus:border-blue-500 text-sm" />
                 <input type="number" placeholder="Alert at Min Qty" required value={form.minStockLevel} onChange={e => setForm({...form, minStockLevel: e.target.value})} className="w-1/2 bg-gray-100 border border-gray-300 rounded-lg px-3 py-2 outline-none focus:border-blue-500 text-sm" />
               </div>
               <label className="flex items-center gap-2 text-xs text-gray-600 mt-1">
@@ -242,8 +244,8 @@ const Inventory = () => {
                         <td className={`px-4 py-3 font-mono font-bold text-right ${isLow ? 'text-red-600' : 'text-gray-800'}`}>
                           {item.quantity} <span className="text-[10px] text-gray-400 ml-1">{item.unit}</span>
                         </td>
-                        <td className="px-4 py-3 font-mono text-gray-600 text-right">BHD {item.unitCost.toFixed(3)}</td>
-                        <td className="px-4 py-3 font-mono text-green-600 font-bold text-right">BHD {(item.quantity * item.unitCost).toFixed(3)}</td>
+                        <td className="px-4 py-3 font-mono text-gray-600 text-right">{currencySymbol} {item.unitCost.toFixed(3)}</td>
+                        <td className="px-4 py-3 font-mono text-green-600 font-bold text-right">{currencySymbol} {(item.quantity * item.unitCost).toFixed(3)}</td>
                         <td className="px-4 py-3 text-center">
                           <button onClick={() => handleRestock(item._id, item.unitCost)} className="bg-gray-200 hover:bg-blue-600 text-gray-700 hover:text-white text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded transition-colors">
                             Restock
@@ -304,7 +306,7 @@ const Inventory = () => {
                   <label className="text-[10px] text-amber-600 font-bold uppercase tracking-widest mb-1 block">Link to POS Menu Item</label>
                   <select required value={recipeForm.linkedProduct} onChange={e => setRecipeForm({...recipeForm, linkedProduct: e.target.value})} className="w-full bg-amber-50 border border-amber-200 text-amber-700 rounded-lg px-3 py-2 outline-none focus:border-amber-500 text-sm">
                     <option value="">-- Select POS Product --</option>
-                    {posProducts.map(p => <option key={p._id} value={p._id}>{p.name} (${p.price})</option>)}
+                    {posProducts.map(p => <option key={p._id} value={p._id}>{p.name} ({currencySymbol} {p.price})</option>)}
                   </select>
                   <p className="text-[10px] text-gray-500 mt-1 font-mono">When a customer orders this, ingredients will auto-deduct.</p>
                 </div>

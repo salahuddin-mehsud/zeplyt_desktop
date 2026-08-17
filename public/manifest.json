@@ -1,0 +1,16 @@
+{
+  "name": "ZEPLYT – Restaurant POS & Management System",
+  "short_name": "ZEPLYT POS",
+  "description": "Powerful restaurant POS, ordering and store management system",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/logo.webp",
+      "sizes": "512x512",
+      "type": "image/webp"
+    }
+  ]
+}

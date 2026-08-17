@@ -1,6 +1,7 @@
 // src/pages/StaffManagement.jsx
 import React, { useState, useEffect } from 'react';
 import api from '../services/api';
+import useCurrency from '../hooks/useCurrency';
 
 const ROLES = ['Manager', 'Cashier', 'Waiter', 'Chef', 'Driver', 'Security', 'Warehouse', 'Other'];
 
@@ -28,6 +29,7 @@ const getUserRole = () => {
 };
 
 export default function StaffManagement() {
+  const { currencySymbol } = useCurrency();
   const userRole = getUserRole();
   const isAdmin = userRole === 'admin';          // full access
   const isUser = userRole === 'user';            // read-only
@@ -216,7 +218,7 @@ export default function StaffManagement() {
             <div className="bg-white border border-blue-200 p-3 rounded-xl shadow-sm">
               <p className="text-[10px] text-blue-600 uppercase font-bold tracking-widest mb-0">Monthly Payroll</p>
               <p className="text-2xl font-mono font-bold text-blue-600">
-                BHD {staff.reduce((sum, emp) => sum + (emp.baseSalaryBHD || 0), 0).toFixed(3)}
+                {currencySymbol} {staff.reduce((sum, emp) => sum + (emp.baseSalaryBHD || 0), 0).toFixed(3)}
               </p>
             </div>
             <div className="bg-white border border-gray-200 p-3 rounded-xl shadow-sm">
@@ -267,7 +269,7 @@ export default function StaffManagement() {
                         </span>
                       </td>
                       <td className="px-3 py-2 font-mono text-green-600 font-bold text-right text-xs">
-                        BHD {emp.baseSalaryBHD.toFixed(3)}
+                        {currencySymbol} {emp.baseSalaryBHD.toFixed(3)}
                       </td>
                       <td className="px-3 py-2 text-gray-500 text-[10px]">
                         {emp.joinedAt ? new Date(emp.joinedAt).toLocaleDateString() : 'N/A'}
@@ -296,19 +298,19 @@ export default function StaffManagement() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
               <div className="bg-white border border-gray-200 p-3 rounded-xl shadow-sm">
                 <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest mb-0">Total Monthly Payroll</p>
-                <p className="text-2xl font-mono font-bold text-gray-800">BHD {payrollSummary.totalDue.toFixed(3)}</p>
+                <p className="text-2xl font-mono font-bold text-gray-800">{currencySymbol} {payrollSummary.totalDue.toFixed(3)}</p>
               </div>
               <div className="bg-white border border-yellow-200 p-3 rounded-xl shadow-sm">
                 <p className="text-[10px] text-yellow-600 uppercase font-bold tracking-widest mb-0">
                   Pending Payroll ({payrollSummary.pendingPercentage?.toFixed(1) || 0}%)
                 </p>
-                <p className="text-2xl font-mono font-bold text-yellow-600">BHD {payrollSummary.totalPending.toFixed(3)}</p>
+                <p className="text-2xl font-mono font-bold text-yellow-600">{currencySymbol} {payrollSummary.totalPending.toFixed(3)}</p>
               </div>
               <div className="bg-white border border-green-200 p-3 rounded-xl shadow-sm">
                 <p className="text-[10px] text-green-600 uppercase font-bold tracking-widest mb-0">
                   Paid Payroll ({payrollSummary.paidPercentage?.toFixed(1) || 0}%)
                 </p>
-                <p className="text-2xl font-mono font-bold text-green-600">BHD {payrollSummary.totalPaid.toFixed(3)}</p>
+                <p className="text-2xl font-mono font-bold text-green-600">{currencySymbol} {payrollSummary.totalPaid.toFixed(3)}</p>
               </div>
             </div>
           )}
@@ -325,7 +327,7 @@ export default function StaffManagement() {
                     {payrollSummary.pendingEmployees.map(emp => (
                       <li key={emp.employeeId} className="py-1 flex justify-between text-xs">
                         <span><span className="font-bold">{emp.name}</span> ({emp.role})</span>
-                        <span className="text-yellow-600 font-mono">BHD {emp.pendingAmount.toFixed(3)} pending</span>
+                        <span className="text-yellow-600 font-mono">{currencySymbol} {emp.pendingAmount.toFixed(3)} pending</span>
                       </li>
                     ))}
                   </ul>
@@ -340,7 +342,7 @@ export default function StaffManagement() {
                     {payrollSummary.paidEmployees.map(emp => (
                       <li key={emp.employeeId} className="py-1 flex justify-between text-xs">
                         <span><span className="font-bold">{emp.name}</span> ({emp.role})</span>
-                        <span className="text-green-600 font-mono">BHD {emp.paidAmount.toFixed(3)} paid</span>
+                        <span className="text-green-600 font-mono">{currencySymbol} {emp.paidAmount.toFixed(3)} paid</span>
                       </li>
                     ))}
                   </ul>
@@ -382,9 +384,9 @@ export default function StaffManagement() {
                           {emp.role}
                         </span>
                       </td>
-                      <td className="px-3 py-2 font-mono text-right text-gray-700">BHD {emp.baseSalaryBHD.toFixed(3)}</td>
-                      <td className="px-3 py-2 font-mono text-right text-green-600">BHD {emp.paidAmount.toFixed(3)}</td>
-                      <td className="px-3 py-2 font-mono text-right text-yellow-600">BHD {emp.pendingAmount.toFixed(3)}</td>
+                      <td className="px-3 py-2 font-mono text-right text-gray-700">{currencySymbol} {emp.baseSalaryBHD.toFixed(3)}</td>
+                      <td className="px-3 py-2 font-mono text-right text-green-600">{currencySymbol} {emp.paidAmount.toFixed(3)}</td>
+                      <td className="px-3 py-2 font-mono text-right text-yellow-600">{currencySymbol} {emp.pendingAmount.toFixed(3)}</td>
                       <td className="px-3 py-2 text-gray-500 text-[10px]">{emp.nextPaymentDate}</td>
                       {isAdmin && (
                         <td className="px-3 py-2 text-center">
@@ -438,7 +440,7 @@ export default function StaffManagement() {
                   <input type="text" value={formData.shift} onChange={e => setFormData({...formData, shift: e.target.value})} className="w-full bg-gray-100 border border-gray-300 rounded-lg px-3 py-1.5 outline-none focus:border-blue-500 text-sm text-gray-800 transition-colors" placeholder="Morning" />
                 </div>
                 <div>
-                  <label className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mb-0.5 block">Alloted Salary (BHD)</label>
+                  <label className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mb-0.5 block">Alloted Salary ({currencySymbol})</label>
                   <input type="number" step="0.001" required value={formData.baseSalaryBHD} onChange={e => setFormData({...formData, baseSalaryBHD: Number(e.target.value)})} className="w-full bg-gray-100 border border-gray-300 rounded-lg px-3 py-1.5 outline-none focus:border-blue-500 text-sm text-gray-800 transition-colors font-mono" placeholder="0.000" />
                 </div>
               </div>
@@ -468,7 +470,7 @@ export default function StaffManagement() {
             <h2 className="text-base font-bold mb-3 text-gray-800 tracking-tight">Record Payment</h2>
             <form onSubmit={handlePaySubmit} className="space-y-3">
               <div>
-                <label className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mb-0.5 block">Amount (BHD)</label>
+                <label className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mb-0.5 block">Amount ({currencySymbol})</label>
                 <input type="number" step="0.001" required value={payData.amount} onChange={e => setPayData({...payData, amount: Number(e.target.value)})} className="w-full bg-gray-100 border border-gray-300 rounded-lg px-3 py-1.5 outline-none focus:border-blue-500 text-sm text-gray-800 transition-colors font-mono" />
               </div>
               <div>

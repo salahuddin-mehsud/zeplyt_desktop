@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import api from '../services/api';
+import { currencySymbolFor } from '../hooks/useCurrency';
 
 const DigitalMenu = () => {
   const { userId, tableId } = useParams();
@@ -13,6 +14,7 @@ const DigitalMenu = () => {
   
   const [customerName, setCustomerName] = useState('');
   const [instructions, setInstructions] = useState('');
+  const currencySymbol = currencySymbolFor(data.currency);
 
   useEffect(() => {
     // Lock the entire app to the mobile screen, preventing native browser bouncing
@@ -104,7 +106,7 @@ const DigitalMenu = () => {
           <div key={p._id} className="bg-black border border-zinc-800/80 p-3 rounded-xl flex flex-col justify-between hover:border-zinc-700 active:bg-zinc-900 transition-all">
             <div>
               <h3 className="font-bold text-zinc-200 text-[11px] leading-snug line-clamp-2">{p.name}</h3>
-              <p className="text-blue-400 font-mono text-[10px] font-bold mt-1">BHD {p.price.toFixed(3)}</p>
+              <p className="text-blue-400 font-mono text-[10px] font-bold mt-1">{currencySymbol} {p.price.toFixed(3)}</p>
             </div>
             <button onClick={() => addToCart(p)} className="mt-3 w-full bg-zinc-900 text-white py-1.5 rounded-lg font-bold text-[10px] border border-zinc-800 hover:bg-blue-600 hover:border-blue-500 transition-all">
               ADD
@@ -132,7 +134,7 @@ const DigitalMenu = () => {
                   <span className="text-zinc-200 line-clamp-1">{item.name}</span>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
-                  <span className="font-mono text-zinc-400">BHD {(item.price * item.qty).toFixed(3)}</span>
+                  <span className="font-mono text-zinc-400">{currencySymbol} {(item.price * item.qty).toFixed(3)}</span>
                   <button onClick={() => removeFromCart(item._id)} className="w-5 h-5 bg-red-500/10 text-red-500 rounded flex items-center justify-center font-bold pb-0.5 hover:bg-red-500 hover:text-white transition-colors">-</button>
                 </div>
               </div>
@@ -148,7 +150,7 @@ const DigitalMenu = () => {
             
             <button onClick={placeOrder} className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-lg font-bold text-[11px] tracking-widest uppercase transition-colors flex justify-between px-4 items-center shadow-lg shadow-blue-500/20">
               <span>PLACE ORDER</span>
-              <span className="font-mono bg-black/20 px-2 py-1 rounded">BHD {(cartTotal * 1.1).toFixed(3)}</span>
+              <span className="font-mono bg-black/20 px-2 py-1 rounded">{currencySymbol} {(cartTotal * 1.1).toFixed(3)}</span>
             </button>
           </div>
 

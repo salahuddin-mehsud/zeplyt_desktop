@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import api from '../services/api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useNavigate } from 'react-router-dom';
+import useCurrency from '../hooks/useCurrency';
 
 const SuperAdmin = () => {
+  const { currencySymbol } = useCurrency();
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -143,7 +145,7 @@ const SuperAdmin = () => {
                 </div>
                 <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 shadow-sm">
                   <p className="text-[10px] font-bold text-blue-700 uppercase tracking-wider mb-1">Total Revenue</p>
-                  <p className="text-2xl font-black text-blue-700">BHD {data.restoredSummary?.totalSalesOrdersPreserved?.toFixed(2) || '0.00'}</p>
+                  <p className="text-2xl font-black text-blue-700">{currencySymbol} {data.restoredSummary?.totalSalesOrdersPreserved?.toFixed(2) || '0.00'}</p>
                 </div>
                 <div className="bg-green-50 border border-green-200 rounded-xl p-4 shadow-sm">
                   <p className="text-[10px] font-bold text-green-700 uppercase tracking-wider mb-1">Total Orders</p>
@@ -151,7 +153,7 @@ const SuperAdmin = () => {
                 </div>
                 <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 shadow-sm">
                   <p className="text-[10px] font-bold text-purple-700 uppercase tracking-wider mb-1">Avg Order Value</p>
-                  <p className="text-2xl font-black text-purple-700">BHD {data.restoredSummary?.avgOrderValuePreserved?.toFixed(2) || '0.00'}</p>
+                  <p className="text-2xl font-black text-purple-700">{currencySymbol} {data.restoredSummary?.avgOrderValuePreserved?.toFixed(2) || '0.00'}</p>
                 </div>
               </div>
 
@@ -159,9 +161,9 @@ const SuperAdmin = () => {
               <div className="bg-white border border-gray-200 p-4 rounded-xl shadow-sm">
                 <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Combined Sales Breakdown</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                  <div><span className="text-gray-400">Gross Sales:</span> <span className="text-gray-800 font-mono font-medium">BHD {data.restoredSummary?.grossSalesPreserved?.toFixed(2) || '0.00'}</span></div>
-                  <div><span className="text-gray-400">Tax:</span> <span className="text-red-500 font-mono font-medium">BHD {data.restoredSummary?.taxAmountPreserved?.toFixed(2) || '0.00'}</span></div>
-                  <div><span className="text-gray-400">Net Sales:</span> <span className="text-green-600 font-mono font-bold">BHD {data.restoredSummary?.netSalesAfterTaxPreserved?.toFixed(2) || '0.00'}</span></div>
+                  <div><span className="text-gray-400">Gross Sales:</span> <span className="text-gray-800 font-mono font-medium">{currencySymbol} {data.restoredSummary?.grossSalesPreserved?.toFixed(2) || '0.00'}</span></div>
+                  <div><span className="text-gray-400">Tax:</span> <span className="text-red-500 font-mono font-medium">{currencySymbol} {data.restoredSummary?.taxAmountPreserved?.toFixed(2) || '0.00'}</span></div>
+                  <div><span className="text-gray-400">Net Sales:</span> <span className="text-green-600 font-mono font-bold">{currencySymbol} {data.restoredSummary?.netSalesAfterTaxPreserved?.toFixed(2) || '0.00'}</span></div>
                   <div><span className="text-gray-400">Total Orders:</span> <span className="text-gray-800 font-mono font-medium">{data.restoredSummary?.totalOrdersPreserved || 0}</span></div>
                 </div>
               </div>
@@ -181,7 +183,7 @@ const SuperAdmin = () => {
                         <td className="px-4 py-2 font-mono text-gray-400">#{idx + 1}</td>
                         <td className="px-4 py-2 font-medium text-gray-800">{item._id}</td>
                         <td className="px-4 py-2 font-mono text-gray-600 text-right">{item.qtySold}</td>
-                        <td className="px-4 py-2 font-mono text-green-600 font-bold text-right">BHD {item.revenue.toFixed(2)}</td>
+                        <td className="px-4 py-2 font-mono text-green-600 font-bold text-right">{currencySymbol} {item.revenue.toFixed(2)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -196,7 +198,7 @@ const SuperAdmin = () => {
               {selectedDataPoint && (
                 <div className="mb-4 bg-yellow-50 border border-yellow-200 p-3 rounded-lg flex items-center justify-between text-xs">
                   <div><p className="text-[10px] text-yellow-600 uppercase tracking-wider font-bold mb-0.5">Selected {trendGranularity}</p><p className="text-sm font-bold text-gray-800">{selectedDataPoint._id}</p></div>
-                  <div className="text-right"><p className="text-[10px] text-gray-400 uppercase tracking-wider font-bold mb-0.5">Revenue</p><p className="text-lg font-mono font-black text-green-600">BHD {selectedDataPoint.revenue?.toFixed(2) || '0.00'}</p></div>
+                  <div className="text-right"><p className="text-[10px] text-gray-400 uppercase tracking-wider font-bold mb-0.5">Revenue</p><p className="text-lg font-mono font-black text-green-600">{currencySymbol} {selectedDataPoint.revenue?.toFixed(2) || '0.00'}</p></div>
                 </div>
               )}
               <div className="w-full h-[300px] mt-2">
@@ -204,7 +206,7 @@ const SuperAdmin = () => {
                   <LineChart data={data.trends || []} margin={{ top: 10, right: 20, left: 0, bottom: 10 }} onClick={(e) => { if (e?.activePayload?.length > 0) setSelectedDataPoint(e.activePayload[0].payload); }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
                     <XAxis dataKey="_id" stroke="#9ca3af" fontSize={10} tickLine={false} axisLine={false} tickMargin={6} minTickGap={40} />
-                    <YAxis stroke="#9ca3af" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `BHD ${val.toLocaleString()}`} />
+                    <YAxis stroke="#9ca3af" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `${currencySymbol} ${val.toLocaleString()}`} />
                     <Tooltip cursor={{ stroke: '#d1d5db', strokeWidth: 1, strokeDasharray: '3 3' }} contentStyle={{ backgroundColor: '#fff', borderColor: '#e5e7eb', color: '#1f2937', borderRadius: '6px', padding: '8px', fontSize: '12px' }} />
                     <Line type="monotone" dataKey="revenue" stroke="#eab308" strokeWidth={2.5} dot={{ r: 2.5, fill: '#fff', stroke: '#eab308', strokeWidth: 2 }} activeDot={{ r: 6, fill: '#eab308', stroke: '#fff', strokeWidth: 2, cursor: 'pointer' }} isAnimationActive={false} />
                   </LineChart>
@@ -224,7 +226,7 @@ const SuperAdmin = () => {
                       <span className="text-[10px] text-yellow-700 bg-yellow-50 px-2 py-0.5 rounded">{branch.percentage}%</span>
                     </div>
                     <div className="space-y-1 text-xs">
-                      <div className="flex justify-between"><span className="text-gray-400">Revenue</span><span className="text-green-600 font-mono font-medium">BHD {branch.revenue.toFixed(2)}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-400">Revenue</span><span className="text-green-600 font-mono font-medium">{currencySymbol} {branch.revenue.toFixed(2)}</span></div>
                       <div className="flex justify-between"><span className="text-gray-400">Orders</span><span className="text-gray-800 font-mono font-medium">{branch.orders}</span></div>
                     </div>
                   </div>
@@ -239,7 +241,7 @@ const SuperAdmin = () => {
                     <div key={idx}>
                       <div className="flex justify-between text-xs mb-0.5">
                         <span className="text-gray-600">{branch.branchName}</span>
-                        <span className="text-green-600 font-mono font-medium">BHD {branch.revenue.toFixed(2)}</span>
+                        <span className="text-green-600 font-mono font-medium">{currencySymbol} {branch.revenue.toFixed(2)}</span>
                       </div>
                       <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
                         <div className="bg-yellow-500 h-full rounded-full" style={{ width: `${Math.min(branch.percentage, 100)}%` }}></div>

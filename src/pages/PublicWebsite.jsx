@@ -1,5 +1,6 @@
 // src/pages/PublicWebsite.jsx
 import { useEffect, useState } from 'react';
+import { currencySymbolFor } from '../hooks/useCurrency';
 
 const PublicWebsite = ({ domainOrId }) => {
   const [data, setData] = useState(null);
@@ -22,6 +23,7 @@ const PublicWebsite = ({ domainOrId }) => {
   if (!data || !data.site) return <div className="min-h-screen flex items-center justify-center bg-black text-white">Website Not Configured.</div>;
 
   const { site, products: posProducts } = data;
+  const currencySymbol = currencySymbolFor(data.currency);
   const theme = site.theme || { background: '#ffffff', headings: '#111827', paragraphs: '#4b5563', buttons: '#3b82f6', navbarBg: '#ffffff', navbarText: '#111827', footerBg: '#111827', footerText: '#ffffff', headingFont: 'Inter', paragraphFont: 'Inter' };
   const nav = site.navbar || { showAbout: true, showContact: true, siteName: 'Restaurant', logoUrl: '' };
   
@@ -115,7 +117,7 @@ const PublicWebsite = ({ domainOrId }) => {
                       <div className="p-6 flex flex-col flex-1">
                         <div className="flex justify-between items-start mb-2">
                           <h3 style={{ color: theme.headings, fontFamily: `"${theme.headingFont}", sans-serif` }} className="font-bold text-xl pr-4">{p.name}</h3>
-                          <span style={{ color: theme.buttons }} className="font-black text-lg">${Number(p.price).toFixed(2)}</span>
+                          <span style={{ color: theme.buttons }} className="font-black text-lg">{currencySymbol} {Number(p.price).toFixed(2)}</span>
                         </div>
                         {p.description && <p className="text-sm mb-6 flex-1 opacity-80">{p.description}</p>}
                         <button onClick={() => addToCart(p)} style={{ backgroundColor: theme.buttons, color: '#ffffff' }} className="w-full font-bold py-3 rounded-xl uppercase tracking-widest text-xs mt-auto">Add to Cart</button>
@@ -202,7 +204,7 @@ const PublicWebsite = ({ domainOrId }) => {
                             <p style={{ color: theme.headings }} className="font-bold">{item.name}</p>
                             <p className="text-sm opacity-70">Qty: {item.qty}</p>
                           </div>
-                          <p style={{ color: theme.headings }} className="font-black">${(item.price * item.qty).toFixed(2)}</p>
+                          <p style={{ color: theme.headings }} className="font-black">{currencySymbol} {(item.price * item.qty).toFixed(2)}</p>
                         </div>
                       ))
                     }
@@ -216,9 +218,9 @@ const PublicWebsite = ({ domainOrId }) => {
                       <textarea placeholder="Delivery Address" required rows="2" value={checkoutForm.address} onChange={e => setCheckoutForm({...checkoutForm, address: e.target.value})} style={{ backgroundColor: theme.background, color: theme.paragraphs, borderColor: `${theme.headings}20` }} className="w-full px-4 py-3 rounded-lg border outline-none resize-none"></textarea>
                       
                       <div style={{ borderColor: `${theme.headings}20` }} className="pt-4 mt-4 border-t">
-                        <div className="flex justify-between text-sm mb-2 opacity-80"><span>Subtotal</span><span>${cartTotal.toFixed(2)}</span></div>
-                        <div className="flex justify-between text-sm mb-4 opacity-80"><span>Tax</span><span>${(cartTotal * 0.1).toFixed(2)}</span></div>
-                        <div style={{ color: theme.headings }} className="flex justify-between text-2xl font-black mb-6"><span>Total</span><span>${(cartTotal * 1.1).toFixed(2)}</span></div>
+                        <div className="flex justify-between text-sm mb-2 opacity-80"><span>Subtotal</span><span>{currencySymbol} {cartTotal.toFixed(2)}</span></div>
+                        <div className="flex justify-between text-sm mb-4 opacity-80"><span>Tax</span><span>{currencySymbol} {(cartTotal * 0.1).toFixed(2)}</span></div>
+                        <div style={{ color: theme.headings }} className="flex justify-between text-2xl font-black mb-6"><span>Total</span><span>{currencySymbol} {(cartTotal * 1.1).toFixed(2)}</span></div>
                         <button type="submit" style={{ backgroundColor: theme.buttons, color: '#ffffff' }} className="w-full font-bold py-4 rounded-xl uppercase tracking-widest text-sm">Place COD Order</button>
                       </div>
                     </form>

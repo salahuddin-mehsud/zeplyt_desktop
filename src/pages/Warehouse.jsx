@@ -1,8 +1,10 @@
 // src/pages/Warehouse.jsx
 import { useEffect, useState } from 'react';
 import api from '../services/api';
+import useCurrency from '../hooks/useCurrency';
 
 const Warehouse = () => {
+  const { currencySymbol } = useCurrency();
   const [activeTab, setActiveTab] = useState('DASHBOARD');
   
   // Data States
@@ -116,7 +118,7 @@ const Warehouse = () => {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <div className="bg-white border border-gray-200 p-3 rounded-xl">
               <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest mb-0">Total Vault Value</p>
-              <p className="text-xl font-mono font-bold text-green-600">BHD {summary.totalValue.toFixed(3)}</p>
+              <p className="text-xl font-mono font-bold text-green-600">{currencySymbol} {summary.totalValue.toFixed(3)}</p>
             </div>
             <div className="bg-white border border-gray-200 p-3 rounded-xl">
               <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest mb-0">Active SKUs</p>
@@ -169,7 +171,7 @@ const Warehouse = () => {
                 <select value={stockForm.unit} onChange={e => setStockForm({...stockForm, unit: e.target.value})} className="w-1/2 bg-gray-100 border border-gray-300 rounded-lg px-2.5 py-1.5 outline-none focus:border-blue-500 text-xs text-gray-700">
                   <option value="Pallets">Pallets</option><option value="Tons">Tons</option><option value="Cartons">Cartons</option><option value="Drums">Drums</option>
                 </select>
-                <input type="number" step="0.001" placeholder="Val/Unit (BHD)" required value={stockForm.unitValue} onChange={e => setStockForm({...stockForm, unitValue: e.target.value})} className="w-1/2 bg-gray-100 border border-gray-300 rounded-lg px-2.5 py-1.5 outline-none focus:border-blue-500 text-xs" />
+                <input type="number" step="0.001" placeholder={`Val/Unit (${currencySymbol})`} required value={stockForm.unitValue} onChange={e => setStockForm({...stockForm, unitValue: e.target.value})} className="w-1/2 bg-gray-100 border border-gray-300 rounded-lg px-2.5 py-1.5 outline-none focus:border-blue-500 text-xs" />
               </div>
               <input type="text" placeholder="Location Bin" required value={stockForm.locationBin} onChange={e => setStockForm({...stockForm, locationBin: e.target.value})} className="w-full bg-gray-100 border border-gray-300 rounded-lg px-2.5 py-1.5 outline-none focus:border-blue-500 text-xs" />
               

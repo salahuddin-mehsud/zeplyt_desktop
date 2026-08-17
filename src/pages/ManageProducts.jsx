@@ -21,6 +21,7 @@ const ManageProducts = () => {
     tags: [],
   });
   const [editingId, setEditingId] = useState(null);
+  const [imageError, setImageError] = useState('');
 
   const getCurrencySymbol = (code) => {
     const symbols = {
@@ -72,6 +73,7 @@ const ManageProducts = () => {
     stockQuantity: '',
     tags: [],
   });
+  setImageError('');
   setEditingId(null);
 };
 
@@ -141,9 +143,16 @@ const ManageProducts = () => {
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
-    if (file) {
-      setForm({ ...form, image: file, imagePreview: URL.createObjectURL(file) });
+    if (!file) return;
+
+    if (file.type !== 'image/webp') {
+      e.target.value = '';
+      setImageError('Only WebP product images are accepted. Please convert your image to .webp format before uploading it.');
+      return;
     }
+
+    setImageError('');
+    setForm({ ...form, image: file, imagePreview: URL.createObjectURL(file) });
   };
 
   return (
@@ -190,14 +199,18 @@ const ManageProducts = () => {
             <div className="md:col-span-3 flex flex-wrap items-center gap-2">
               <input
                 type="file"
-                accept="image/*"
+                accept="image/webp,.webp"
                 onChange={handleImageChange}
                 className="bg-white border border-gray-200 rounded-lg px-2 py-1 text-sm file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:bg-blue-600 file:text-white hover:file:bg-blue-500"
               />
+              <span className="text-[10px] text-gray-500">WebP only</span>
               {form.imagePreview && (
                 <img src={form.imagePreview} alt="Preview" className="w-8 h-8 object-cover rounded border border-gray-200" />
               )}
             </div>
+            {imageError && (
+              <p role="alert" className="md:col-span-3 -mt-2 text-xs text-red-600">{imageError}</p>
+            )}
 
 <div className="md:col-span-3">
   <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">Description</label>
@@ -292,22 +305,7 @@ const ManageProducts = () => {
               {editingId && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setEditingId(null);
-                    setForm({
-                      name: '',
-                      price: '',
-                      category: '',
-                      image: null,
-                      imagePreview: '',
-                      discountEnabled: false,
-                      discountType: 'percentage',
-                      discountValue: 0,
-                      inStock: true,
-                      stockQuantity: '',
-                      tags: [],
-                    });
-                  }}
+                  onClick={resetForm}
                   className="px-4 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-bold text-xs uppercase transition-colors"
                 >
                   Cancel

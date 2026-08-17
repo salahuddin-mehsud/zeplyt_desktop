@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { IoClose } from 'react-icons/io5';
+import useCurrency from '../hooks/useCurrency';
 
 const PaymentModal = ({ isOpen, onClose, orderData, paymentMethods, onProcessPayment }) => {
+  const { currencySymbol } = useCurrency();
   const [activeTab, setActiveTab] = useState('FINAL BILL');
   
   // Discount State
@@ -31,17 +33,25 @@ const PaymentModal = ({ isOpen, onClose, orderData, paymentMethods, onProcessPay
   if (!isOpen || !orderData) return null;
 
   const subTotal = orderData.subTotal || 0;
-  const taxAmount = orderData.taxAmount || 0;
+  const taxBreakdown = orderData.taxBreakdown || [];
+  const chargeBreakdown = orderData.chargeBreakdown || [];
+  const exclusiveTaxAmount = taxBreakdown.length > 0
+    ? taxBreakdown.filter(t => t.itemPricing === 'Exclusive').reduce((sum, t) => sum + (Number(t.amount) || 0), 0)
+    : (orderData.taxAmount || 0);
+  const exclusiveChargeAmount = chargeBreakdown
+    ? chargeBreakdown.filter(c => c.itemPricing === 'Exclusive').reduce((sum, c) => sum + (Number(c.amount) || 0), 0)
+    : 0;
   const shippingCost = orderData.shippingCost || 0;
+  const baseFinalAmount = subTotal + exclusiveTaxAmount + exclusiveChargeAmount + shippingCost;
 
   let discountAmount = 0;
   const val = parseFloat(discountValue) || 0;
   
   if (discountType === '%') discountAmount = (subTotal * val) / 100;
   else if (discountType === 'Amt') discountAmount = val;
-  else if (discountType === 'Complimentary' || discountType === 'Non Chargeable') discountAmount = subTotal + taxAmount + shippingCost;
+  else if (discountType === 'Complimentary' || discountType === 'Non Chargeable') discountAmount = baseFinalAmount;
 
-  const finalAmount = Math.max(subTotal + taxAmount + shippingCost - discountAmount, 0);
+  const finalAmount = Math.max(baseFinalAmount - discountAmount, 0);
   
   const parsedCash = parseFloat(cashGiven) || 0;
   const toBePaidBack = Math.max(parsedCash - finalAmount, 0);
@@ -70,7 +80,7 @@ const PaymentModal = ({ isOpen, onClose, orderData, paymentMethods, onProcessPay
           </div>
           <div className="flex items-center gap-3">
             <span className="text-xs font-bold font-mono text-blue-700 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-200">
-              DUE: BHD {finalAmount.toFixed(3)}
+              DUE: {currencySymbol} {finalAmount.toFixed(3)}
             </span>
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition"><IoClose size={20} /></button>
           </div>
@@ -116,7 +126,7 @@ const PaymentModal = ({ isOpen, onClose, orderData, paymentMethods, onProcessPay
               
               {discountAmount > 0 && (
                 <div className="mt-3 bg-green-50 border border-green-200 text-green-700 p-1.5 rounded-lg text-xs font-mono text-center">
-                  Discount Applied: BHD {discountAmount.toFixed(3)}
+                  Discount Applied: {currencySymbol} {discountAmount.toFixed(3)}
                 </div>
               )}
             </div>
@@ -132,24 +142,39 @@ const PaymentModal = ({ isOpen, onClose, orderData, paymentMethods, onProcessPay
 
               <div className="grid grid-cols-2 gap-3 items-center bg-gray-50 p-3 rounded-lg border border-gray-200">
                 <div className="space-y-1 text-xs">
-                  <div className="flex justify-between"><span className="text-gray-500">SUB TOTAL:</span><span className="font-mono">BHD {subTotal.toFixed(3)}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">TAX:</span><span className="font-mono">BHD {taxAmount.toFixed(3)}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">SUB TOTAL:</span><span className="font-mono">{currencySymbol} {subTotal.toFixed(3)}</span></div>
+                  {taxBreakdown.length > 0 ? (
+                    taxBreakdown.map((t, idx) => (
+                      <div key={idx} className="flex justify-between">
+                        <span className="text-gray-500">{t.taxName?.toUpperCase() || 'TAX'} ({t.percentage}%):</span>
+                        <span className="font-mono">{currencySymbol} {(Number(t.amount) || 0).toFixed(3)}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="flex justify-between"><span className="text-gray-500">TAX:</span><span className="font-mono">{currencySymbol} {(orderData.taxAmount || 0).toFixed(3)}</span></div>
+                  )}
+                  {chargeBreakdown.map((c, idx) => (
+                    <div key={idx} className="flex justify-between text-blue-600">
+                      <span className="text-blue-500">{c.chargeName?.toUpperCase() || 'CHARGE'}{c.chargeType === 'Fixed' ? '' : ` (${c.percentage}%)`}:</span>
+                      <span className="font-mono">{currencySymbol} {(Number(c.amount) || 0).toFixed(3)}</span>
+                    </div>
+                  ))}
                   {shippingCost > 0 && (
                     <div className="flex justify-between text-purple-600">
                       <span className="text-purple-500">DELIVERY CHARGES:</span>
-                      <span className="font-mono">BHD {shippingCost.toFixed(3)}</span>
+                      <span className="font-mono">{currencySymbol} {shippingCost.toFixed(3)}</span>
                     </div>
                   )}
                   {discountAmount > 0 && (
                     <div className="flex justify-between text-green-600">
                       <span className="text-green-500">DISCOUNT:</span>
-                      <span className="font-mono">- BHD {discountAmount.toFixed(3)}</span>
+                      <span className="font-mono">- {currencySymbol} {discountAmount.toFixed(3)}</span>
                     </div>
                   )}
                 </div>
                 <div className="bg-blue-600 rounded-lg p-2 text-center shadow-sm">
                   <span className="block text-[9px] font-bold tracking-widest uppercase text-blue-100 mb-0.5">Final Amount</span>
-                  <span className="text-lg font-black font-mono text-white">BHD {finalAmount.toFixed(3)}</span>
+                  <span className="text-lg font-black font-mono text-white">{currencySymbol} {finalAmount.toFixed(3)}</span>
                 </div>
               </div>
 
@@ -181,7 +206,7 @@ const PaymentModal = ({ isOpen, onClose, orderData, paymentMethods, onProcessPay
                     <div>
                       <span className="block text-[10px] text-gray-500 uppercase tracking-widest mb-0.5 pt-0.5">TO BE PAID BACK:</span>
                       <div className="bg-white/80 border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-mono text-amber-600">
-                        {toBePaidBack > 0 ? `BHD ${toBePaidBack.toFixed(3)}` : '0.000'}
+                        {toBePaidBack > 0 ? `${currencySymbol} ${toBePaidBack.toFixed(3)}` : '0.000'}
                       </div>
                     </div>
                   </div>

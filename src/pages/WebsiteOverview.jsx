@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { format } from 'date-fns';
+import useCurrency from '../hooks/useCurrency';
 
 const WebsiteOverview = () => {
+  const { currencySymbol } = useCurrency();
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -154,7 +156,7 @@ const WebsiteOverview = () => {
             <div className="bg-white border border-gray-200 p-2 rounded-lg shadow-sm">
               <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Total Revenue</p>
               <p className="text-lg font-black text-green-600">
-                ${data.totalRevenue?.toFixed(2) || '0.00'}
+                {currencySymbol} {data.totalRevenue?.toFixed(2) || '0.00'}
               </p>
             </div>
             <div className="bg-white border border-gray-200 p-2 rounded-lg shadow-sm">
@@ -205,7 +207,7 @@ const WebsiteOverview = () => {
                           {order.date ? format(new Date(order.date), 'MMM d, yyyy h:mm a') : 'N/A'}
                         </td>
                         <td className="px-2 py-1.5 font-mono text-green-600 font-bold text-right">
-                          ${order.total?.toFixed(2) || '0.00'}
+                          {currencySymbol} {order.total?.toFixed(2) || '0.00'}
                         </td>
                         <td className="px-2 py-1.5 text-center">
                           <span
@@ -270,7 +272,7 @@ const WebsiteOverview = () => {
                   {/* Delivery Cost */}
                   <div className="flex flex-wrap gap-2 items-end mb-2">
                     <div>
-                      <label className="text-[9px] text-gray-500">Delivery Cost ($)</label>
+                      <label className="text-[9px] text-gray-500">Delivery Cost ({currencySymbol})</label>
                       <input
                         type="number"
                         step="0.01"

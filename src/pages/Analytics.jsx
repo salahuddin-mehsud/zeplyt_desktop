@@ -14,6 +14,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { useNavigate } from "react-router-dom";
+import useCurrency from '../hooks/useCurrency';
 
 const Analytics = () => {
   const [data, setData] = useState(null);
@@ -22,7 +23,7 @@ const Analytics = () => {
   const [basketSize, setBasketSize] = useState(2);
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("EXECUTIVE SUMMARY");
-  const [currencySymbol, setCurrencySymbol] = useState("BHD ");
+  const { currencySymbol } = useCurrency();
   const [selectedDate, setSelectedDate] = useState(() => {
     const d = new Date();
     return new Date(d.getTime() - d.getTimezoneOffset() * 60000)
@@ -363,14 +364,15 @@ const Analytics = () => {
                       </span>
                     </div>
                     <div className="flex justify-between py-1.5 border-b border-gray-100">
-                      <span className="text-gray-500">Charges</span>
+                      <span className="text-gray-500">Delivery Charges</span>
                       <span className="font-mono text-amber-500">
                         {currencySymbol}
-                        {(data.restoredSummary?.chargesPreserved || 0).toFixed(
+                        {(data.restoredSummary?.deliveryChargesPreserved || 0).toFixed(
                           2,
                         )}
                       </span>
                     </div>
+                    {(data.restoredSummary?.chargeBreakdown || []).map((charge) => <div key={`${charge.chargeName}-${charge.chargeType}-${charge.percentage}`} className="flex justify-between py-1.5 border-b border-gray-100"><span className="text-gray-500">{charge.chargeName}{charge.chargeType === 'Fixed' ? '' : ` (${charge.percentage}%)`}</span><span className="font-mono text-amber-500">{currencySymbol}{Number(charge.amount || 0).toFixed(2)}</span></div>)}
                     <div className="flex justify-between py-1.5 border-b border-gray-100">
                       <span className="text-gray-500">
                         Net Sales (Before Tax)
@@ -414,12 +416,8 @@ const Analytics = () => {
                     </h3>
                   </div>
                   <div className="p-4 space-y-2 text-xs">
-                    <div className="flex justify-between py-1.5 border-b border-gray-100">
-                      <span className="text-gray-500">VAT Rate</span>
-                      <span className="font-mono text-gray-700">
-                        {data.restoredSummary?.taxRate || 0}%
-                      </span>
-                    </div>
+                    {(data.restoredSummary?.taxBreakdown || []).map((tax) => <div key={`${tax.taxName}-${tax.percentage}-${tax.itemPricing}`} className="flex justify-between py-1.5 border-b border-gray-100"><span className="text-gray-500">{tax.taxName} ({tax.percentage}%)</span><span className="font-mono text-amber-600">{currencySymbol}{Number(tax.amount || 0).toFixed(2)}</span></div>)}
+                    {!(data.restoredSummary?.taxBreakdown || []).length && <div className="flex justify-between py-1.5 border-b border-gray-100"><span className="text-gray-500">Tax</span><span className="font-mono text-gray-700">{currencySymbol}0.00</span></div>}
                     <div className="flex justify-between py-1.5 border-b border-gray-100">
                       <span className="text-gray-500">Taxable Amount</span>
                       <span className="font-mono text-gray-700">
@@ -450,7 +448,7 @@ const Analytics = () => {
                       </span>
                     </div>
                     <div className="mt-1 text-[10px] text-gray-400 text-center border-t border-gray-100 pt-2">
-                      Tax rate applied globally as per store settings
+                      Tax totals are grouped from the taxes applied to each order
                     </div>
                   </div>
                 </div>
@@ -693,7 +691,7 @@ const Analytics = () => {
             Revenue
           </p>
           <p className="text-base font-mono font-black text-green-600">
-            BHD {selectedDataPoint.revenue.toFixed(3)}
+            {currencySymbol} {selectedDataPoint.revenue.toFixed(3)}
           </p>
         </div>
       </div>
@@ -733,7 +731,7 @@ const Analytics = () => {
               fontSize={8}
               tickLine={false}
               axisLine={false}
-              tickFormatter={(val) => `BHD ${val.toLocaleString()}`}
+              tickFormatter={(val) => `${currencySymbol} ${val.toLocaleString()}`}
             />
             <Tooltip
               cursor={{
@@ -758,7 +756,7 @@ const Analytics = () => {
                 letterSpacing: "0.3px",
               }}
               formatter={(value) => [
-                `BHD ${value.toFixed(3)}`,
+                `${currencySymbol} ${value.toFixed(3)}`,
                 "Revenue",
               ]}
               labelFormatter={(label) => {
@@ -816,7 +814,7 @@ const Analytics = () => {
             </p>
             <div className="flex items-center justify-between mt-0.5">
               <p className="text-[9px] text-gray-400 font-mono">
-                BHD {data.addonsData.marginMetrics.topSold?.revenue?.toFixed(3) || "0.000"} Generated
+                {currencySymbol} {data.addonsData.marginMetrics.topSold?.revenue?.toFixed(3) || "0.000"} Generated
               </p>
               <span className="text-[9px] text-gray-400 bg-gray-200 border border-gray-200 px-1.5 py-0.5 rounded font-mono">
                 {getPercentage(data.addonsData.marginMetrics.topSold?.revenue)}% of Total
@@ -840,7 +838,7 @@ const Analytics = () => {
           </div>
           <div className="relative z-10 mt-1.5 pt-1.5 border-t border-blue-100">
             <p className="text-[10px] text-green-600 font-mono font-bold">
-              BHD {data.addonsData.marginMetrics.topRevenue?.revenue?.toFixed(3) || "0.000"} Generated
+              {currencySymbol} {data.addonsData.marginMetrics.topRevenue?.revenue?.toFixed(3) || "0.000"} Generated
             </p>
             <div className="flex items-center justify-between mt-0.5">
               <p className="text-[9px] text-gray-400 font-mono">
@@ -868,7 +866,7 @@ const Analytics = () => {
           </div>
           <div className="relative z-10 mt-1.5 pt-1.5 border-t border-purple-100">
             <p className="text-[10px] text-green-600 font-mono font-bold">
-              BHD {data.addonsData.marginMetrics.secondRevenue?.revenue?.toFixed(3) || "0.000"} Generated
+              {currencySymbol} {data.addonsData.marginMetrics.secondRevenue?.revenue?.toFixed(3) || "0.000"} Generated
             </p>
             <div className="flex items-center justify-between mt-0.5">
               <p className="text-[9px] text-gray-400 font-mono">
@@ -913,7 +911,7 @@ const Analytics = () => {
                 <td className="px-2 py-1.5 font-mono text-gray-400">#{idx + 1}</td>
                 <td className="px-2 py-1.5 font-bold text-gray-800">{item._id}</td>
                 <td className="px-2 py-1.5 font-mono text-gray-600 text-right">{item.qtySold}</td>
-                <td className="px-2 py-1.5 font-mono text-green-600 font-bold text-right">BHD {item.revenue.toFixed(3)}</td>
+                <td className="px-2 py-1.5 font-mono text-green-600 font-bold text-right">{currencySymbol} {item.revenue.toFixed(3)}</td>
               </tr>
             ))}
           </tbody>
@@ -945,7 +943,7 @@ const Analytics = () => {
                 <li key={i} className="flex justify-between items-center text-[10px]">
                   <span className="text-gray-600 font-medium">{item.name}</span>
                   <div className="text-right">
-                    <span className="block text-yellow-600 font-mono text-[9px] font-bold">BHD {item.revenue.toFixed(3)}</span>
+                    <span className="block text-yellow-600 font-mono text-[9px] font-bold">{currencySymbol} {item.revenue.toFixed(3)}</span>
                     <span className="block text-gray-400 font-mono text-[7px]">{item.qty} Units</span>
                   </div>
                 </li>
@@ -970,7 +968,7 @@ const Analytics = () => {
                 <li key={i} className="flex justify-between items-center text-[10px]">
                   <span className="text-gray-600 font-medium">{item.name}</span>
                   <div className="text-right">
-                    <span className="block text-blue-600 font-mono text-[9px] font-bold">BHD {item.revenue.toFixed(3)}</span>
+                    <span className="block text-blue-600 font-mono text-[9px] font-bold">{currencySymbol} {item.revenue.toFixed(3)}</span>
                     <span className="block text-gray-400 font-mono text-[7px]">{item.qty} Units</span>
                   </div>
                 </li>
@@ -995,7 +993,7 @@ const Analytics = () => {
                 <li key={i} className="flex justify-between items-center text-[10px]">
                   <span className="text-gray-600 font-medium">{item.name}</span>
                   <div className="text-right">
-                    <span className="block text-purple-600 font-mono text-[9px] font-bold">BHD {item.revenue.toFixed(3)}</span>
+                    <span className="block text-purple-600 font-mono text-[9px] font-bold">{currencySymbol} {item.revenue.toFixed(3)}</span>
                     <span className="block text-gray-400 font-mono text-[7px]">{item.qty} Units</span>
                   </div>
                 </li>
@@ -1020,7 +1018,7 @@ const Analytics = () => {
                 <li key={i} className="flex justify-between items-center text-[10px]">
                   <span className="text-gray-600 font-medium">{item.name}</span>
                   <div className="text-right">
-                    <span className="block text-red-600 font-mono text-[9px] font-bold">BHD {item.revenue.toFixed(3)}</span>
+                    <span className="block text-red-600 font-mono text-[9px] font-bold">{currencySymbol} {item.revenue.toFixed(3)}</span>
                     <span className="block text-gray-400 font-mono text-[7px]">{item.qty} Units</span>
                   </div>
                 </li>
@@ -1105,7 +1103,7 @@ const Analytics = () => {
                     <span className="text-[10px] font-bold text-gray-600">{item.name}</span>
                   </div>
                   <div className="text-right">
-                    <span className="block text-[10px] font-mono text-green-600 font-bold">BHD {item.revenue.toFixed(3)}</span>
+                    <span className="block text-[10px] font-mono text-green-600 font-bold">{currencySymbol} {item.revenue.toFixed(3)}</span>
                     <span className="block text-[8px] text-gray-400 font-mono tracking-wider uppercase mt-0">{item.percentage}% of Total</span>
                   </div>
                 </li>
@@ -1131,7 +1129,7 @@ const Analytics = () => {
             Avg. Order Value
           </span>
           <span className="text-base text-gray-800 font-mono">
-            BHD {data.restoredSummary.avgOrderValuePreserved.toFixed(3)}
+            {currencySymbol} {data.restoredSummary.avgOrderValuePreserved.toFixed(3)}
           </span>
         </div>
         <div>
@@ -1306,7 +1304,7 @@ const Analytics = () => {
                     style={{ bottom: `${avgY}%` }}
                   >
                     <span className="absolute -top-4 right-0 bg-white px-1.5 py-0.5 rounded text-[8px] text-blue-600 border border-blue-200">
-                      Historical Avg: BHD {avgVol.toFixed(0)}
+                      Historical Avg: {currencySymbol} {avgVol.toFixed(0)}
                     </span>
                   </div>
                   <div className="absolute inset-0 flex items-end gap-0.5 z-10">
@@ -1319,7 +1317,7 @@ const Analytics = () => {
                           className="flex-1 h-full flex flex-col justify-end group relative cursor-pointer"
                         >
                           <div className="absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-800 text-white text-[8px] py-0.5 px-1 rounded whitespace-nowrap z-20 text-center pointer-events-none">
-                            BHD {mv.sales.toFixed(0)}
+                            {currencySymbol} {mv.sales.toFixed(0)}
                             <br />
                             <span className={mv.percentageDiff > 0 ? "text-green-400" : "text-red-400"}>
                               {mv.percentageDiff > 0 ? "+" : ""}{mv.percentageDiff}% vs Avg
@@ -1378,7 +1376,7 @@ const Analytics = () => {
                         <div className="bg-gray-400 h-full rounded-full" style={{ width: `${avgWidth}%` }}></div>
                       </div>
                       <div className="w-14 text-[9px] font-mono text-gray-500">
-                        BHD {wpd.avgRev.toFixed(0)}
+                        {currencySymbol} {wpd.avgRev.toFixed(0)}
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1389,7 +1387,7 @@ const Analytics = () => {
                         <div className="bg-blue-500 h-full rounded-full" style={{ width: `${peakWidth}%` }}></div>
                       </div>
                       <div className="w-14 text-[9px] font-mono text-green-600 font-bold flex flex-col leading-tight">
-                        <span>BHD {wpd.peakRev.toFixed(0)}</span>
+                        <span>{currencySymbol} {wpd.peakRev.toFixed(0)}</span>
                         <span className="text-[7px]">+{wpd.percentageHigher}%</span>
                       </div>
                     </div>
@@ -1430,7 +1428,7 @@ const Analytics = () => {
                         <div className="bg-gray-400 h-full rounded-full" style={{ width: `${avgWidth}%` }}></div>
                       </div>
                       <div className="w-14 text-[9px] font-mono text-gray-500">
-                        BHD {mph.avgRev.toFixed(0)}
+                        {currencySymbol} {mph.avgRev.toFixed(0)}
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1441,7 +1439,7 @@ const Analytics = () => {
                         <div className="bg-orange-500 h-full rounded-full" style={{ width: `${peakWidth}%` }}></div>
                       </div>
                       <div className="w-14 text-[9px] font-mono text-green-600 font-bold flex flex-col leading-tight">
-                        <span>BHD {mph.peakRev.toFixed(0)}</span>
+                        <span>{currencySymbol} {mph.peakRev.toFixed(0)}</span>
                         <span className="text-[7px]">+{mph.percentageHigher}%</span>
                       </div>
                     </div>
@@ -1484,7 +1482,7 @@ const Analytics = () => {
             Lost Revenue
           </p>
           <p className="text-xl font-black text-red-600 font-mono">
-            BHD {data.addonsData.refundMetrics?.lostRevenue?.toFixed(3) || "0.000"}
+            {currencySymbol} {data.addonsData.refundMetrics?.lostRevenue?.toFixed(3) || "0.000"}
           </p>
         </div>
       </div>

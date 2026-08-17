@@ -54,6 +54,121 @@ function formatItemLine(item, format, decimalPlaces) {
     .replace(/{total}/g, total);
 }
 
+export function buildReceiptTotalsLines(order, s = {}, isKitchen = false) {
+  if (isKitchen) return [];
+  const decimalPlaces = s.decimalPlaces ?? 2;
+  const deliveryFee = Number(order.shippingCost ?? order.deliveryFee ?? 0);
+  const discountAmount = Number(order.discountAmount ?? 0);
+  const subtotal = Number(order.subTotal ?? 0);
+  const finalAmount = Number(order.finalAmount ?? 0);
+  const taxBreakdown = Array.isArray(order.taxBreakdown) ? order.taxBreakdown : [];
+  const chargeBreakdown = Array.isArray(order.chargeBreakdown) ? order.chargeBreakdown : [];
+
+  const taxLines = [];
+  if (s.showTax !== false) {
+    if (taxBreakdown.length > 0) {
+      taxBreakdown.forEach(tax => {
+        taxLines.push(`${tax.taxName || 'Tax'} (${tax.percentage || 0}%): ${Number(tax.amount || 0).toFixed(decimalPlaces)}`);
+      });
+    } else if (order.taxAmount > 0) {
+      taxLines.push(`Tax (${order.taxPercentage || 10}%): ${(order.taxAmount || 0).toFixed(decimalPlaces)}`);
+    }
+  }
+
+  const chargeLines = [];
+  if (chargeBreakdown.length > 0) {
+    chargeBreakdown.forEach(charge => {
+      const suffix = charge.chargeType === 'Fixed' ? '' : ` (${charge.percentage}%)`;
+      chargeLines.push(`${charge.chargeName || 'Charge'}${suffix}: ${Number(charge.amount || 0).toFixed(decimalPlaces)}`);
+    });
+  }
+
+  const deliveryLines = [];
+  if (deliveryFee > 0 && order.type === 'Delivery') {
+    deliveryLines.push(`Delivery: ${deliveryFee.toFixed(decimalPlaces)}`);
+  }
+
+  const discountLines = [];
+  if (discountAmount > 0) {
+    discountLines.push(`Discount: ${discountAmount.toFixed(decimalPlaces)}`);
+  }
+
+  if (s.totalsFormat) {
+    const rawLines = s.totalsFormat.split(/\r?\n/);
+    const resultLines = [];
+    let taxesHandled = false;
+    let chargesHandled = false;
+    let deliveryHandled = false;
+    let discountHandled = false;
+
+    for (const rawLine of rawLines) {
+      const trimmed = rawLine.trim();
+      if (!trimmed) continue;
+
+      if (trimmed.includes('{taxes}') || trimmed.includes('{tax}') || trimmed.toLowerCase().startsWith('tax')) {
+        taxLines.forEach(l => resultLines.push(l));
+        taxesHandled = true;
+        continue;
+      }
+      if (trimmed.includes('{charges}') || trimmed.includes('{service_charge}')) {
+        chargeLines.forEach(l => resultLines.push(l));
+        chargesHandled = true;
+        continue;
+      }
+      if (trimmed.includes('{delivery}') || trimmed.toLowerCase().startsWith('delivery')) {
+        if (deliveryFee > 0 && order.type === 'Delivery') {
+          resultLines.push(trimmed.replace(/{delivery}/g, deliveryFee.toFixed(decimalPlaces)));
+          deliveryHandled = true;
+        }
+        continue;
+      }
+      if (trimmed.includes('{discount}') || trimmed.toLowerCase().startsWith('discount')) {
+        if (discountAmount > 0) {
+          resultLines.push(trimmed.replace(/{discount}/g, discountAmount.toFixed(decimalPlaces)));
+          discountHandled = true;
+        }
+        continue;
+      }
+
+      // Before Total line, insert any unhandled taxes/charges/delivery/discount
+      if (trimmed.includes('{total}') || trimmed.toLowerCase().startsWith('total')) {
+        if (!taxesHandled) { taxLines.forEach(l => resultLines.push(l)); taxesHandled = true; }
+        if (!chargesHandled) { chargeLines.forEach(l => resultLines.push(l)); chargesHandled = true; }
+        if (!discountHandled) { discountLines.forEach(l => resultLines.push(l)); discountHandled = true; }
+        if (!deliveryHandled) { deliveryLines.forEach(l => resultLines.push(l)); deliveryHandled = true; }
+
+        if (s.showTotal !== false) {
+          resultLines.push(trimmed.replace(/{total}/g, finalAmount.toFixed(decimalPlaces)));
+        }
+        continue;
+      }
+
+      // Other lines (e.g. Subtotal)
+      let line = trimmed
+        .replace(/{subtotal}/g, subtotal.toFixed(decimalPlaces))
+        .replace(/{total}/g, finalAmount.toFixed(decimalPlaces));
+      resultLines.push(line);
+    }
+
+    if (!taxesHandled) taxLines.forEach(l => resultLines.push(l));
+    if (!chargesHandled) chargeLines.forEach(l => resultLines.push(l));
+    if (!discountHandled) discountLines.forEach(l => resultLines.push(l));
+    if (!deliveryHandled) deliveryLines.forEach(l => resultLines.push(l));
+
+    return resultLines;
+  }
+
+  // Fallback if no totalsFormat:
+  const lines = [];
+  if (s.showSubtotal !== false) lines.push(`Subtotal: ${subtotal.toFixed(decimalPlaces)}`);
+  taxLines.forEach(l => lines.push(l));
+  chargeLines.forEach(l => lines.push(l));
+  discountLines.forEach(l => lines.push(l));
+  deliveryLines.forEach(l => lines.push(l));
+  if (s.showTotal !== false) lines.push(`TOTAL: ${finalAmount.toFixed(decimalPlaces)}`);
+  return lines;
+}
+
 export function generateReceiptHTML(order, type = 'kitchen', settings) {
   console.log('[RECEIPT] Full order object:', JSON.stringify(order, null, 2));
 
@@ -102,46 +217,28 @@ export function generateReceiptHTML(order, type = 'kitchen', settings) {
   }
 
   const {
-    logoUrl, logoWidth, headerLines = [], footerLines = [],
+    logoUrl, logoWidth, headerLines, footerLines,
     globalAlignment, globalBold, globalDoubleHeight,
-    showDivider, showTax, showSubtotal, showTotal, showCustomerName,
-    showTable, showDateTime, showToken, showOrderNo,
-    itemColumns = [], totalsFormat, decimalPlaces = 2, fontMultiplier = 1,
+    showDivider, showTax, showSubtotal, showTotal,
+    showCustomerName, showTable, showDateTime, showToken, showOrderNo,
+    itemColumns, itemFormat, totalsFormat, decimalPlaces,
+    fontMultiplier, sectionMargin
   } = settings;
 
-  // ── Define default width percentages for each column ──
-  const defaultWidths = {
-    sr: 5,
-    name: 45,
-    qty: 10,
-    price: 15,
-    amount: 25,
-  };
-  const kitchenWidths = {
-    sr: 10,
-    name: 70,
-    qty: 20,
-  };
+  // ---- Items table ----
+  const defaultCols = getDefaultColumns(type);
+  const activeCols = (itemColumns && itemColumns.length > 0)
+    ? itemColumns.filter(c => c.visible !== false)
+    : defaultCols;
 
-  let cols = itemColumns.length ? itemColumns : getDefaultColumns(type);
-  if (type === 'kitchen') {
-    cols = cols.filter(col => col.key !== 'price' && col.key !== 'amount');
-  }
-  const visibleCols = cols.filter(c => c.visible !== false);
-
-  const widths = type === 'kitchen' ? kitchenWidths : defaultWidths;
-  let totalWidth = 0;
-  const colsWithWidth = visibleCols.map(col => {
-    let w = col.width && col.width > 0 ? col.width : (widths[col.key] || 10);
-    totalWidth += w;
-    return { ...col, width: w };
-  });
-  const normalized = colsWithWidth.map(col => ({
-    ...col,
-    pct: ((col.width / totalWidth) * 100).toFixed(2)
+  const colPcts = { sr: 8, name: 40, qty: 12, price: 20, amount: 20 };
+  const totalPct = activeCols.reduce((sum, c) => sum + (colPcts[c.key] || 20), 0);
+  const normalized = activeCols.map(c => ({
+    ...c,
+    pct: Math.round(((colPcts[c.key] || 20) / totalPct) * 100)
   }));
 
-  const itemsRowsHTML = items.map((item, idx) => {
+  const itemsRowsHTML = (items || []).map((item, idx) => {
     const cells = normalized.map(col => {
       let val = '';
       switch (col.key) {
@@ -161,35 +258,7 @@ export function generateReceiptHTML(order, type = 'kitchen', settings) {
     `<th style="padding:0; text-align:${col.align || 'left'}; width:${col.pct}%;">${col.label}</th>`
   ).join('');
 
-  const deliveryFee = Number(order.shippingCost ?? order.deliveryFee ?? 0);
-  const finalDiscountAmount = Number(discountAmount ?? 0);
-  const subtotal = Number(subTotal ?? 0);
-  const tax = Number(taxAmount ?? 0);
-  const total = Number(finalAmount ?? 0);
-
-  // Build totals lines manually
-  const totalLines = [];
-
-  // Always include subtotal
-  totalLines.push(`Subtotal: ${subtotal.toFixed(decimalPlaces)}`);
-
-  // Tax – only if showTax is true (default is true)
-  if (showTax !== false) {   // ✅ FIXED: use showTax, not s.showTax
-    totalLines.push(`Tax: ${tax.toFixed(decimalPlaces)}`);
-  }
-
-  // Discount – only if > 0
-  if (finalDiscountAmount > 0) {
-    totalLines.push(`Discount: ${finalDiscountAmount.toFixed(decimalPlaces)}`);
-  }
-
-  // Delivery – only if > 0 AND order is Delivery
-  if (deliveryFee > 0 && order.type === 'Delivery') {
-    totalLines.push(`Delivery: ${deliveryFee.toFixed(decimalPlaces)}`);
-  }
-
-  // Total – always
-  totalLines.push(`Total: ${total.toFixed(decimalPlaces)}`);
+  const totalLines = buildReceiptTotalsLines(order, settings, type === 'kitchen');
 
   const totalsHTML = totalLines
     .map(line => `<p style="margin:0; padding:0; white-space:pre;">${line}</p>`)
@@ -218,6 +287,7 @@ export function generateReceiptHTML(order, type = 'kitchen', settings) {
       <p style="margin:0; padding:0;">Type: ${orderType} ${table?.name ? `- ${table.name}` : ''}</p>
       ${showDateTime !== false ? `<p style="margin:0; padding:0;">${type === 'kitchen' ? 'Time' : 'Date'}: ${type === 'kitchen' ? new Date(createdAt).toLocaleTimeString() : new Date(createdAt).toLocaleString()}</p>` : ''}
       ${showCustomerName !== false ? `<p style="margin:0; padding:0;">${customerLabel} ${customerName || 'Walk-in'}</p>` : ''}
+      ${order.waiter?.name ? `<p style="margin:0; padding:0;">Waiter: ${order.waiter.name}${order.waiter.phone ? ` (${order.waiter.phone})` : ''}</p>` : ''}
       ${addressLines.length > 0 ? `<p style="margin:0; padding:0;">Address: ${addressLines[0]}</p>` : ''}
 ${addressLines.slice(1).map(line => `<p style="margin:0; padding:0; padding-left: 2em;">${line}</p>`).join('')}
       ${showDivider !== false ? '<hr style="margin:0.5mm 0; border:0; border-top:1px solid #000;"/>' : ''}
@@ -434,34 +504,11 @@ export function generateReceiptPreviewLines(order, type = 'kitchen', settings, c
   });
   pushSpacing(s.sectionMargin ?? 1);
 
-    if (!isKitchen) {
-    const deliveryFee = Number(order.shippingCost ?? order.deliveryFee ?? 0);
-    const discountAmount = Number(order.discountAmount ?? 0);
-
-    if (s.totalsFormat) {
-      let formatted = s.totalsFormat
-        .replace(/{subtotal}/g, (order.subTotal ?? 0).toFixed(s.decimalPlaces ?? 2))
-        .replace(/{tax}/g, (order.taxAmount ?? 0).toFixed(s.decimalPlaces ?? 2))
-        .replace(/{discount}/g, discountAmount.toFixed(s.decimalPlaces ?? 2))
-        .replace(/{delivery}/g, deliveryFee.toFixed(s.decimalPlaces ?? 2))
-        .replace(/{total}/g, (order.finalAmount ?? 0).toFixed(s.decimalPlaces ?? 2));
-      formatted.split('\n')
-        .filter(l => {
-          const trimmed = l.trim();
-          if (!trimmed) return false;
-          if (trimmed.includes('Discount:') && discountAmount === 0) return false;
-          if (trimmed.includes('Delivery:') && (deliveryFee === 0 || order.type !== 'Delivery')) return false;
-          return true;
-        })
-        .forEach(l => pushLine(l));
-    } else {
-      // Fallback – conditionally show lines
-      if (s.showSubtotal !== false) pushLine(`Subtotal: ${(order.subTotal ?? 0).toFixed(s.decimalPlaces ?? 2)}`);
-      if (s.showTax !== false) pushLine(`Tax (${order.taxPercentage || 10}%): ${(order.taxAmount ?? 0).toFixed(s.decimalPlaces ?? 2)}`);
-      if (discountAmount > 0) pushLine(`Discount: ${discountAmount.toFixed(s.decimalPlaces ?? 2)}`);
-      if (deliveryFee > 0 && order.type === 'Delivery') pushLine(`Delivery: ${deliveryFee.toFixed(s.decimalPlaces ?? 2)}`);
-      if (s.showTotal !== false) pushLine(`TOTAL: ${(order.finalAmount ?? 0).toFixed(s.decimalPlaces ?? 2)}`, { bold: true });
-    }
+  if (!isKitchen) {
+    const totalLines = buildReceiptTotalsLines(order, s, isKitchen);
+    totalLines.forEach(line => {
+      pushLine(line, { bold: line.startsWith('TOTAL:') });
+    });
   }
   pushSpacing(s.sectionMargin ?? 1);
 

@@ -5,6 +5,8 @@ import PaymentModal from "../components/PaymentModal";
 import * as printer from '../utils/receiptPrinter';
 import { emitPrintOrder } from '../utils/printSocket';
 import { dispatchPrint } from '../utils/printDispatcher';
+import { isConnectionFailure, localOrders, queueOfflineOrder, queueOfflineUpdate } from '../services/offlineStore';
+
 // Local helper for cache keys used by the POS screen
 const getCacheKeys = () => ({
   DINE_IN: 'pos:dine_in_cache',
@@ -26,6 +28,8 @@ const Orders = () => {
   const [deliveryCities, setDeliveryCities] = useState([]);
   const [currencySymbol, setCurrencySymbol] = useState("$");
   const [globalTaxRate, setGlobalTaxRate] = useState(10);
+  const [configuredTaxes, setConfiguredTaxes] = useState([]);
+  const [configuredCharges, setConfiguredCharges] = useState([]);
   const [orders, setOrders] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchToken, setSearchToken] = useState("");
@@ -49,33 +53,32 @@ const Orders = () => {
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [productSearch, setProductSearch] = useState("");
 
-
   // Driver selection modal
-const [isDriverModalOpen, setIsDriverModalOpen] = useState(false);
-const [pendingOrderId, setPendingOrderId] = useState(null);
-const [driverList, setDriverList] = useState([]);
-const [selectedDriverId, setSelectedDriverId] = useState('');
-const [otherDriverName, setOtherDriverName] = useState('');
-const [otherDriverPhone, setOtherDriverPhone] = useState('');
-const [driverSearch, setDriverSearch] = useState('');
+  const [isDriverModalOpen, setIsDriverModalOpen] = useState(false);
+  const [pendingOrderId, setPendingOrderId] = useState(null);
+  const [driverList, setDriverList] = useState([]);
+  const [selectedDriverId, setSelectedDriverId] = useState('');
+  const [otherDriverName, setOtherDriverName] = useState('');
+  const [otherDriverPhone, setOtherDriverPhone] = useState('');
+  const [driverSearch, setDriverSearch] = useState('');
 
+  // For driver selection in the Delivery creation modal
+  const [deliverySelectedDriverId, setDeliverySelectedDriverId] = useState('');
+  const [deliveryOtherDriverName, setDeliveryOtherDriverName] = useState('');
+  const [deliveryOtherDriverPhone, setDeliveryOtherDriverPhone] = useState('');
+  const [deliveryDriverSearch, setDeliveryDriverSearch] = useState('');
+  const [waiterList, setWaiterList] = useState([]);
+  const [selectedWaiterId, setSelectedWaiterId] = useState('');
+  const [waiterSearch, setWaiterSearch] = useState('');
 
-// For driver selection in the Delivery creation modal
-const [deliverySelectedDriverId, setDeliverySelectedDriverId] = useState('');
-const [deliveryOtherDriverName, setDeliveryOtherDriverName] = useState('');
-const [deliveryOtherDriverPhone, setDeliveryOtherDriverPhone] = useState('');
-const [deliveryDriverSearch, setDeliveryDriverSearch] = useState('');
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [cancelOrderId, setCancelOrderId] = useState(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelStartDate, setCancelStartDate] = useState("");
+  const [cancelEndDate, setCancelEndDate] = useState("");
 
-const [cancelModalOpen, setCancelModalOpen] = useState(false);
-const [cancelOrderId, setCancelOrderId] = useState(null);
-const [cancelReason, setCancelReason] = useState("");
-const [cancelStartDate, setCancelStartDate] = useState("");
-const [cancelEndDate, setCancelEndDate] = useState("");
-
-
-
-const [viewDetailsModalOpen, setViewDetailsModalOpen] = useState(false);
-const [viewDetailsOrder, setViewDetailsOrder] = useState(null);
+  const [viewDetailsModalOpen, setViewDetailsModalOpen] = useState(false);
+  const [viewDetailsOrder, setViewDetailsOrder] = useState(null);
 
   const navigate = useNavigate();
 
@@ -98,36 +101,61 @@ const [viewDetailsOrder, setViewDetailsOrder] = useState(null);
 
       setPaymentMethods(payRes.data.paymentMethods || []);
 
-      setOrders(ordersRes.data || []);
+      setOrders([...localOrders(), ...(ordersRes.data || [])]);
     } catch (err) {
       console.error('Failed to load POS data', err);
     }
   };
 
+  const fetchCurrencyAndTax = async () => {
+    try {
+      const res = await api.get("/dashboard/settings/operating-hours");
+      const cur = res.data.settings?.currency || "USD";
+      const symbols = {
+        USD: "$",
+        EUR: "€",
+        GBP: "£",
+        PKR: "PKR",
+        INR: "₹",
+        BHD: "BHD",
+        SAR: "SAR",
+        AED: "AED",
+        KWD: "KWD",
+        CAD: "C$",
+        AUD: "A$",
+      };
+      setCurrencySymbol(symbols[cur] || cur);
+      const savedTaxes = res.data.settings?.taxes ?? [];
+      setConfiguredTaxes(savedTaxes);
+      setConfiguredCharges(res.data.settings?.charges ?? []);
+      const taxRate = res.data.settings?.taxRate ?? 0;
+      setGlobalTaxRate(taxRate);
+    } catch (err) {
+      console.error("Failed to fetch settings", err);
+      setCurrencySymbol("$");
+      setGlobalTaxRate(10);
+    }
+  };
+
   useEffect(() => {
-    const fetchCurrencyAndTax = async () => {
-      try {
-        const res = await api.get("/dashboard/settings/operating-hours");
-        const cur = res.data.settings?.currency || "USD";
-        const symbols = {
-          USD: "$",
-          EUR: "€",
-          GBP: "£",
-          BHD: "BHD",
-          SAR: "SAR",
-          AED: "AED",
-          KWD: "KWD",
-        };
-        setCurrencySymbol(symbols[cur] || cur);
-        const taxRate = res.data.settings?.taxRate ?? 10;
-        setGlobalTaxRate(taxRate);
-      } catch (err) {
-        console.error("Failed to fetch settings", err);
-        setCurrencySymbol("$");
-        setGlobalTaxRate(10);
-      }
-    };
     fetchCurrencyAndTax();
+
+    const handleSettingsChange = () => {
+      fetchCurrencyAndTax();
+      fetchData();
+    };
+
+    window.addEventListener('branchChanged', handleSettingsChange);
+    window.addEventListener('currencyChanged', handleSettingsChange);
+    window.addEventListener('taxesChanged', handleSettingsChange);
+    window.addEventListener('chargesChanged', handleSettingsChange);
+
+    return () => {
+      window.removeEventListener('branchChanged', handleSettingsChange);
+      window.removeEventListener('currencyChanged', handleSettingsChange);
+      window.removeEventListener('taxesChanged', handleSettingsChange);
+      window.removeEventListener('chargesChanged', handleSettingsChange);
+    };
   }, []);
 
   useEffect(() => {
@@ -176,6 +204,12 @@ const [viewDetailsOrder, setViewDetailsOrder] = useState(null);
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    const refreshAfterSync = () => fetchData();
+    window.addEventListener('offlineQueueSynced', refreshAfterSync);
+    return () => window.removeEventListener('offlineQueueSynced', refreshAfterSync);
+  }, []);
+
   const calculateElapsedTime = (createdAt) => {
     if (!createdAt) return "--";
     const start = new Date(createdAt).getTime();
@@ -221,6 +255,7 @@ const [viewDetailsOrder, setViewDetailsOrder] = useState(null);
     if (activeTab === "Open Orders") {
       matchesTab = [
         "Open Orders",
+        "Pending Web/App Order",
         "Pending Web Order",
         "Online Open",
         "Accepted",
@@ -293,6 +328,8 @@ const [viewDetailsOrder, setViewDetailsOrder] = useState(null);
     reservationTime: "",
     driverName: "",   // ← new
     driverPhone: "",  // ← new
+    waiterName: "",
+    waiterPhone: "",
   });
   setSelectedCityId("");
   setDeliveryCost(0);
@@ -304,6 +341,11 @@ const [viewDetailsOrder, setViewDetailsOrder] = useState(null);
     setDeliveryOtherDriverName('');
     setDeliveryOtherDriverPhone('');
     setDeliveryDriverSearch('');
+  }
+  if (type === 'Dine In' || type === 'Reservation') {
+    fetchWaiters();
+    setSelectedWaiterId('');
+    setWaiterSearch('');
   }
 };
 
@@ -318,14 +360,23 @@ const [viewDetailsOrder, setViewDetailsOrder] = useState(null);
   }
 };
 
-const handleMarkOnWay = (orderId) => {
-  setPendingOrderId(orderId);
-  fetchDrivers();
-  setSelectedDriverId('');
-  setOtherDriverName('');
-  setOtherDriverPhone('');
-  setIsDriverModalOpen(true);
+  const fetchWaiters = async () => {
+  try {
+    const res = await api.get('/staff');
+    setWaiterList(res.data.filter(emp => emp.role === 'Waiter' && emp.status !== 'Terminated'));
+  } catch (err) {
+    console.error('Failed to fetch waiters', err);
+  }
 };
+
+  const handleMarkOnWay = (orderId) => {
+    setPendingOrderId(orderId);
+    fetchDrivers();
+    setSelectedDriverId('');
+    setOtherDriverName('');
+    setOtherDriverPhone('');
+    setIsDriverModalOpen(true);
+  };
 
   const handleTableClick = (areaId, tableId) => {
     const existingOrder = orders.find(
@@ -362,60 +413,127 @@ const handleMarkOnWay = (orderId) => {
   };
 
   const triggerPrint = (order, type = 'kitchen') => {
-  dispatchPrint(order, type).catch(err => console.error('[PRINT] dispatchPrint failed:', err));
-};
+    dispatchPrint(order, type).catch(err => console.error('[PRINT] dispatchPrint failed:', err));
+  };
 
+  const calculateCartTaxes = (subtotal) => {
+    const taxes = configuredTaxes.length
+      ? configuredTaxes
+      : (globalTaxRate > 0 ? [{ taxName: 'Tax', percentage: globalTaxRate, itemPricing: 'Exclusive' }] : []);
+    const taxBreakdown = taxes.map((tax) => {
+      const percentage = Number(tax.percentage) || 0;
+      const inclusive = tax.itemPricing === 'Inclusive';
+      return {
+        taxName: tax.taxName,
+        percentage,
+        itemPricing: inclusive ? 'Inclusive' : 'Exclusive',
+        amount: inclusive ? subtotal * (percentage / (100 + percentage)) : subtotal * (percentage / 100),
+      };
+    });
+    return {
+      taxBreakdown,
+      taxAmount: taxBreakdown.reduce((sum, tax) => sum + tax.amount, 0),
+      exclusiveTaxAmount: taxBreakdown.filter((tax) => tax.itemPricing === 'Exclusive').reduce((sum, tax) => sum + tax.amount, 0),
+    };
+  };
 
+  const calculateCartCharges = (subtotal, orderType = formType) => {
+    const chargeBreakdown = configuredCharges.filter((charge) => {
+      const orderTypes = charge.orderTypes;
+      return !Array.isArray(orderTypes) || orderTypes.length === 0 || orderTypes.includes(orderType);
+    }).map((charge) => {
+      const chargeType = charge.chargeType === 'Fixed' ? 'Fixed' : 'Percentage';
+      const percentage = Number(charge.percentage) || 0;
+      const fixedAmount = Number(charge.amount) || 0;
+      const inclusive = charge.itemPricing === 'Inclusive';
+      const amount = chargeType === 'Fixed' ? fixedAmount : (inclusive ? subtotal * (percentage / (100 + percentage)) : subtotal * (percentage / 100));
+      return { chargeName: charge.chargeName, chargeType, percentage, fixedAmount, itemPricing: inclusive ? 'Inclusive' : 'Exclusive', amount };
+    });
+    return {
+      chargeBreakdown,
+      chargeAmount: chargeBreakdown.reduce((sum, charge) => sum + charge.amount, 0),
+      exclusiveChargeAmount: chargeBreakdown.filter((charge) => charge.itemPricing === 'Exclusive').reduce((sum, charge) => sum + charge.amount, 0),
+    };
+  };
 
   const fireOrderAndOpenPayment = async () => {
-  if (cart.length === 0)
-    return alert("Cart is empty! Add items before firing.");
+    if (cart.length === 0)
+      return alert("Cart is empty! Add items before firing.");
 
-  const subTotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
-  const taxRate = globalTaxRate;
-  const taxAmount = subTotal * (taxRate / 100);
-  const shippingCost = formType === "Delivery" ? deliveryCost : 0;
-  const finalAmount = subTotal + taxAmount + shippingCost;
+    const subTotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+    const taxDetails = calculateCartTaxes(subTotal);
+    const chargeDetails = calculateCartCharges(subTotal, formType);
+    const taxRate = globalTaxRate;
+    const taxAmount = taxDetails.taxAmount;
+    const shippingCost = formType === "Delivery" ? deliveryCost : 0;
+    const finalAmount = subTotal + taxDetails.exclusiveTaxAmount + chargeDetails.exclusiveChargeAmount + shippingCost;
 
-  const items = cart.map((c) => ({
-    product: c._id,
-    name: c.name,
-    qty: c.qty,
-    price: c.price,
-  }));
-  let savedOrder;
+    const items = cart.map((c) => ({
+      product: c._id,
+      name: c.name,
+      qty: c.qty,
+      price: c.price,
+    }));
+    let savedOrder;
 
-  try {
-    if (activeOrderId) {
-      const res = await api.put(`/pos/orders/${activeOrderId}`, {
-        action: "ADD_ITEMS",
-        newItems: items,
-      });
-      savedOrder = res.data;
-    } else {
-      const payload = {
-        ...form,
-        type: formType,
-        items,
-        taxAmount: taxAmount,
-        taxPercentage: taxRate,
-        shippingCost: shippingCost,
-      };
-      const res = await api.post("/pos/orders", payload);
-      savedOrder = res.data;
+    try {
+      if (activeOrderId) {
+        const res = await api.put(`/pos/orders/${activeOrderId}`, {
+          action: "ADD_ITEMS",
+          newItems: items,
+        });
+        savedOrder = res.data;
+      } else {
+        const payload = {
+          ...form,
+          type: formType,
+          items,
+          taxAmount: taxAmount,
+          taxPercentage: taxRate,
+          taxBreakdown: taxDetails.taxBreakdown,
+          chargeAmount: chargeDetails.chargeAmount,
+          chargeBreakdown: chargeDetails.chargeBreakdown,
+          shippingCost: shippingCost,
+          finalAmount: finalAmount,
+        };
+        const res = await api.post("/pos/orders", payload);
+        savedOrder = res.data;
+      }
+      setCart([]);
+      setShowPOS(false);
+      setShowMobileCart(false);
+      setActiveOrderId(null);
+      fetchData();
+      setCurrentOrderForPayment(savedOrder);
+      setIsPaymentModalOpen(true);
+    } catch (error) {
+      if (!activeOrderId && isConnectionFailure(error)) {
+        savedOrder = queueOfflineOrder({
+          ...form,
+          type: formType,
+          items,
+          taxAmount,
+          taxPercentage: taxRate,
+          taxBreakdown: taxDetails.taxBreakdown,
+          chargeAmount: chargeDetails.chargeAmount,
+          chargeBreakdown: chargeDetails.chargeBreakdown,
+          shippingCost,
+          finalAmount,
+        });
+        setCart([]);
+        setShowPOS(false);
+        setShowMobileCart(false);
+        setActiveOrderId(null);
+        setOrders(current => [savedOrder, ...current]);
+        triggerPrint(savedOrder, 'kitchen');
+        setCurrentOrderForPayment(savedOrder);
+        setIsPaymentModalOpen(true);
+        return;
+      }
+      console.error("Failed to fire order:", error);
+      alert("Failed to send order to kitchen.");
     }
-    setCart([]);
-    setShowPOS(false);
-    setShowMobileCart(false);
-    setActiveOrderId(null);
-    fetchData();
-    setCurrentOrderForPayment(savedOrder);
-    setIsPaymentModalOpen(true);
-  } catch (error) {
-    console.error("Failed to fire order:", error);
-    alert("Failed to send order to kitchen.");
-  }
-};
+  };
 
   const handleFinalizePayment = async (paymentDetails) => {
     if (!currentOrderForPayment || !currentOrderForPayment._id) return;
@@ -426,9 +544,16 @@ const handleMarkOnWay = (orderId) => {
       setIsPaymentModalOpen(false);
       setCurrentOrderForPayment(null);
       fetchData();
-      if (paymentDetails.printInvoice) {
-      }
+      // Note: Server updateOrder automatically triggers relayPrintToStore for 'bill' when printInvoice is true
     } catch (err) {
+      if (isConnectionFailure(err)) {
+        queueOfflineUpdate(currentOrderForPayment._id, paymentDetails);
+        setOrders(current => current.map(order => order._id === currentOrderForPayment._id ? { ...order, ...paymentDetails, syncState: 'pending' } : order));
+        setIsPaymentModalOpen(false);
+        setCurrentOrderForPayment(null);
+        if (paymentDetails.printInvoice) triggerPrint({ ...currentOrderForPayment, ...paymentDetails }, 'bill');
+        return;
+      }
       console.error("Payment failed", err);
       alert("Failed to process payment.");
     }
@@ -442,8 +567,14 @@ const handleMarkOnWay = (orderId) => {
   };
 
   const updateOrderStatus = async (id, status) => {
-    await api.put(`/pos/orders/${id}`, { status });
-    fetchData();
+    try {
+      await api.put(`/pos/orders/${id}`, { status });
+      fetchData();
+    } catch (error) {
+      if (!isConnectionFailure(error)) throw error;
+      queueOfflineUpdate(id, { status });
+      setOrders(current => current.map(order => order._id === id ? { ...order, status, syncState: 'pending' } : order));
+    }
   };
 
   const getNextWebsiteOrderStatus = (status) => {
@@ -488,35 +619,37 @@ const handleMarkOnWay = (orderId) => {
   };
 
   const openCancelModal = (orderId) => {
-  setCancelOrderId(orderId);
-  setCancelReason("");
-  setCancelModalOpen(true);
-};
-
-const confirmCancelOrder = async () => {
-  if (!cancelReason.trim()) {
-    alert("Please provide a reason for cancellation.");
-    return;
-  }
-  try {
-    await api.put(`/pos/orders/${cancelOrderId}`, {
-      status: "Cancelled",
-      cancellationReason: cancelReason.trim(),
-    });
-    setCancelModalOpen(false);
-    setCancelOrderId(null);
+    setCancelOrderId(orderId);
     setCancelReason("");
-    fetchData();
-  } catch (err) {
-    console.error("Failed to cancel order:", err);
-    alert("Failed to cancel order.");
-  }
-};
+    setCancelModalOpen(true);
+  };
+
+  const confirmCancelOrder = async () => {
+    if (!cancelReason.trim()) {
+      alert("Please provide a reason for cancellation.");
+      return;
+    }
+    try {
+      await api.put(`/pos/orders/${cancelOrderId}`, {
+        status: "Cancelled",
+        cancellationReason: cancelReason.trim(),
+      });
+      setCancelModalOpen(false);
+      setCancelOrderId(null);
+      setCancelReason("");
+      fetchData();
+    } catch (err) {
+      console.error("Failed to cancel order:", err);
+      alert("Failed to cancel order.");
+    }
+  };
 
   const subTotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
-  const taxAmount = subTotal * (globalTaxRate / 100);
+  const cartTaxDetails = calculateCartTaxes(subTotal);
+  const cartChargeDetails = calculateCartCharges(subTotal, formType);
+  const taxAmount = cartTaxDetails.taxAmount;
   const shippingCostDisplay = formType === "Delivery" ? deliveryCost : 0;
-  const total = subTotal + taxAmount + shippingCostDisplay;
+  const total = subTotal + cartTaxDetails.exclusiveTaxAmount + cartChargeDetails.exclusiveChargeAmount + shippingCostDisplay;
   const cartItemCount = cart.reduce((sum, item) => sum + item.qty, 0);
 
   const getCardStyle = (type, isClosed) => {
@@ -554,13 +687,10 @@ const confirmCancelOrder = async () => {
     setDeliveryCost(city ? city.deliveryCost : 0);
   };
 
-
-const openViewDetails = (order) => {
-  setViewDetailsOrder(order);
-  setViewDetailsModalOpen(true);
-};
-
-
+  const openViewDetails = (order) => {
+    setViewDetailsOrder(order);
+    setViewDetailsModalOpen(true);
+  };
 
   return (
     <div className="fixed inset-0 z-40 bg-gray-50 text-gray-800 font-sans flex overflow-hidden">
@@ -1325,7 +1455,12 @@ const openViewDetails = (order) => {
                             ))}
                             {/* 🆕 Breakdown */}
                             <div className="mt-1.5 pt-1 border-t border-gray-200 space-y-0.5 text-[10px]">
-                              {order.taxAmount > 0 && (
+                              {order.taxBreakdown?.length ? order.taxBreakdown.map((tax, index) => (
+                                <div key={`${tax.taxName}-${index}`} className="flex justify-between text-gray-500">
+                                  <span>{tax.taxName} ({tax.percentage}%)</span>
+                                  <span className="font-mono">{currencySymbol}{Number(tax.amount || 0).toFixed(2)}</span>
+                                </div>
+                              )) : order.taxAmount > 0 && (
                                 <div className="flex justify-between text-gray-500">
                                   <span>
                                     Tax ({order.taxPercentage || globalTaxRate}
@@ -1337,6 +1472,12 @@ const openViewDetails = (order) => {
                                   </span>
                                 </div>
                               )}
+                              {order.chargeBreakdown?.map((charge, index) => (
+                                <div key={`${charge.chargeName}-${index}`} className="flex justify-between text-blue-600">
+                                  <span>{charge.chargeName}{charge.chargeType === 'Fixed' ? '' : ` (${charge.percentage}%)`}</span>
+                                  <span className="font-mono">{currencySymbol}{Number(charge.amount || 0).toFixed(2)}</span>
+                                </div>
+                              ))}
                               {order.shippingCost > 0 && (
                                 <div className="flex justify-between text-purple-600">
                                   <span>Shipping</span>
@@ -1810,6 +1951,19 @@ const openViewDetails = (order) => {
                       )}
                     </div>
                   </div>
+                  <div className="mt-3 pt-3 border-t border-blue-100">
+                    <label className="text-blue-600 text-[10px] font-bold uppercase tracking-wider block mb-1">Assign Waiter (Optional)</label>
+                    <input type="text" placeholder="Search waiters..." value={waiterSearch} onChange={(e) => setWaiterSearch(e.target.value)} className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700 outline-none focus:border-blue-400" />
+                    <div className="max-h-32 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100 mt-2">
+                      {waiterList.filter(w => w.name.toLowerCase().includes(waiterSearch.toLowerCase())).map(waiter => (
+                        <label key={waiter._id} className="flex items-center gap-2 p-2 hover:bg-gray-50 cursor-pointer">
+                          <input type="radio" name="waiter" value={waiter._id} checked={selectedWaiterId === waiter._id} onChange={() => { setSelectedWaiterId(waiter._id); setForm(prev => ({ ...prev, waiterName: waiter.name, waiterPhone: waiter.contact || '' })); }} />
+                          <span className="text-xs font-medium">{waiter.name}</span><span className="text-[10px] text-gray-500 ml-auto">{waiter.contact || 'No phone'}</span>
+                        </label>
+                      ))}
+                      {waiterList.length === 0 && <p className="p-2 text-xs text-gray-400">No waiters found for this branch.</p>}
+                    </div>
+                  </div>
                 </div>
               ) : formType === "Delivery" ? (
                 <div className="bg-purple-50 p-3 sm:p-4 rounded-xl border border-purple-100 mt-1 space-y-3">
@@ -2169,13 +2323,24 @@ const openViewDetails = (order) => {
                       </span>
                     </div>
                   )}
-                <div className="flex justify-between mb-1 text-gray-500 text-xs font-medium">
-                  <span>Tax ({globalTaxRate}%)</span>
-                  <span className="font-mono">
-                    {currencySymbol}
-                    {taxAmount.toFixed(2)}
-                  </span>
-                </div>
+                {cartTaxDetails.taxBreakdown.map((tax, index) => (
+                  <div key={`${tax.taxName}-${index}`} className="flex justify-between mb-1 text-gray-500 text-xs font-medium">
+                    <span>{tax.taxName} ({tax.percentage}%)</span>
+                    <span className="font-mono">
+                      {currencySymbol}
+                      {tax.amount.toFixed(2)}
+                    </span>
+                  </div>
+                ))}
+                {cartChargeDetails.chargeBreakdown.map((charge, index) => (
+                  <div key={`${charge.chargeName}-${index}`} className="flex justify-between mb-1 text-blue-600 text-xs font-medium">
+                    <span>{charge.chargeName}{charge.chargeType === 'Fixed' ? '' : ` (${charge.percentage}%)`}</span>
+                    <span className="font-mono">
+                      {currencySymbol}
+                      {charge.amount.toFixed(2)}
+                    </span>
+                  </div>
+                ))}
                 <div className="flex justify-between mb-3 text-lg font-bold text-gray-800">
                   <span>Total</span>
                   <span className="font-mono">
@@ -2495,12 +2660,23 @@ const openViewDetails = (order) => {
                 <span className="font-mono">{(viewDetailsOrder.currencySymbol || '$')}{viewDetailsOrder.subTotal.toFixed(2)}</span>
               </div>
             )}
-            {viewDetailsOrder.taxAmount > 0 && (
+            {viewDetailsOrder.taxBreakdown?.length ? viewDetailsOrder.taxBreakdown.map((tax, index) => (
+              <div key={`${tax.taxName}-${index}`} className="flex justify-between text-gray-600">
+                <span>{tax.taxName} ({tax.percentage}%)</span>
+                <span className="font-mono">{(viewDetailsOrder.currencySymbol || '$')}{Number(tax.amount || 0).toFixed(2)}</span>
+              </div>
+            )) : viewDetailsOrder.taxAmount > 0 && (
               <div className="flex justify-between text-gray-600">
                 <span>Tax ({viewDetailsOrder.taxPercentage || globalTaxRate}%)</span>
                 <span className="font-mono">{(viewDetailsOrder.currencySymbol || '$')}{viewDetailsOrder.taxAmount.toFixed(2)}</span>
               </div>
             )}
+            {viewDetailsOrder.chargeBreakdown?.map((charge, index) => (
+              <div key={`${charge.chargeName}-${index}`} className="flex justify-between text-blue-600">
+                <span>{charge.chargeName}{charge.chargeType === 'Fixed' ? '' : ` (${charge.percentage}%)`}</span>
+                <span className="font-mono">{(viewDetailsOrder.currencySymbol || '$')}{Number(charge.amount || 0).toFixed(2)}</span>
+              </div>
+            ))}
             {viewDetailsOrder.shippingCost > 0 && (
               <div className="flex justify-between text-purple-600">
                 <span>Shipping</span>

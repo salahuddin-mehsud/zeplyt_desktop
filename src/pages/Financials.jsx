@@ -5,6 +5,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
+import useCurrency from '../hooks/useCurrency';
 import { 
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer, 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, 
@@ -12,6 +13,7 @@ import {
 } from 'recharts';
 
 const Financials = () => {
+  const { currencySymbol } = useCurrency();
   const [activeTab, setActiveTab] = useState('PROFIT & LOSS');
   const [pnlData, setPnlData] = useState(null);
   const [expenses, setExpenses] = useState([]);
@@ -199,7 +201,7 @@ const Financials = () => {
         doc.setFontSize(12); doc.setTextColor(0); doc.text("1. Executive Summary", 14, 50);
         autoTable(doc, {
           startY: 55,
-          head: [['Metric', 'BHD Amount']],
+          head: [['Metric', `${currencySymbol} Amount`]],
           body: [
             ['Gross Sales (Revenue)', pnlData.revenue.totalGross.toFixed(3)],
             ['VAT Collected (10%)', pnlData.revenue.totalTax.toFixed(3)],
@@ -225,10 +227,10 @@ const Financials = () => {
           startY: 55,
           head: [['Analysis Component', 'Data Value']],
           body: [
-            ['Total Net Sales', `BHD ${pnlData.revenue.totalNet.toFixed(3)}`],
-            ['Gross Profit Margin', `BHD ${pnlData.profitability.grossProfit.toFixed(3)}`],
+            ['Total Net Sales', `${currencySymbol} ${pnlData.revenue.totalNet.toFixed(3)}`],
+            ['Gross Profit Margin', `${currencySymbol} ${pnlData.profitability.grossProfit.toFixed(3)}`],
             ['Return on Investment (ROI)', `${pnlData.profitability.roiMargin.toFixed(2)}%`],
-            ['Net Profitability', `BHD ${pnlData.profitability.netProfit.toFixed(3)}`]
+            ['Net Profitability', `${currencySymbol} ${pnlData.profitability.netProfit.toFixed(3)}`]
           ],
           headStyles: { fillColor: [16, 185, 129] }
         });
@@ -242,7 +244,7 @@ const Financials = () => {
           body: [
             ['Box 1: Standard Rated Sales', pnlData.revenue.totalGross.toFixed(3), pnlData.revenue.totalTax.toFixed(3)],
             ['Box 2: Total Adjustments', '0.000', '0.000'],
-            ['TOTAL PAYABLE FOR PERIOD', '', { content: `BHD ${pnlData.revenue.totalTax.toFixed(3)}`, styles: { fontStyle: 'bold', fillColor: [254, 226, 226] } }]
+            ['TOTAL PAYABLE FOR PERIOD', '', { content: `${currencySymbol} ${pnlData.revenue.totalTax.toFixed(3)}`, styles: { fontStyle: 'bold', fillColor: [254, 226, 226] } }]
           ],
           headStyles: { fillColor: [220, 38, 38] }
         });
@@ -363,22 +365,22 @@ return (
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
   <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Gross Revenue</p>
-    <p className="text-xl font-black font-mono text-blue-600">BHD {pnlData.revenue.totalGross.toFixed(2)}</p>
+    <p className="text-xl font-black font-mono text-blue-600">{currencySymbol} {pnlData.revenue.totalGross.toFixed(2)}</p>
   </div>
   <div className="bg-white border border-yellow-200 rounded-xl p-4 shadow-sm">
   <p className="text-[10px] font-bold text-yellow-600 uppercase tracking-wider mb-0.5">Pending Payroll</p>
   <p className="text-xl font-black font-mono text-yellow-600">
-    BHD {pnlData.staffPayroll?.pendingPayroll?.toFixed(2) || '0.00'}
+    {currencySymbol} {pnlData.staffPayroll?.pendingPayroll?.toFixed(2) || '0.00'}
   </p>
   <p className="text-[8px] text-gray-400 mt-0.5">Unpaid salaries this month</p>
 </div>
   <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Total Expenses</p>
-    <p className="text-xl font-black font-mono text-orange-500">BHD {pnlData.expenses.totalOutflow.toFixed(2)}</p>
+    <p className="text-xl font-black font-mono text-orange-500">{currencySymbol} {pnlData.expenses.totalOutflow.toFixed(2)}</p>
   </div>
   <div className={`border rounded-xl p-4 shadow-sm ${pnlData.profitability.netProfit >= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
     <p className={`text-[10px] font-bold uppercase tracking-wider mb-0.5 ${pnlData.profitability.netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>Net Profit</p>
-    <p className={`text-2xl font-black font-mono ${pnlData.profitability.netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>BHD {pnlData.profitability.netProfit.toFixed(2)}</p>
+    <p className={`text-2xl font-black font-mono ${pnlData.profitability.netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>{currencySymbol} {pnlData.profitability.netProfit.toFixed(2)}</p>
   </div>
 
 </div>
@@ -392,8 +394,8 @@ return (
     <BarChart data={waterfallData} margin={{ top: 10, right: 20, left: 0, bottom: 5 }}>
       <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
       <XAxis dataKey="name" stroke="#9ca3af" fontSize={10} tickLine={false} axisLine={false} />
-      <YAxis stroke="#9ca3af" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `BHD ${val}`} />
-      <Tooltip cursor={{fill: '#f3f4f6'}} contentStyle={{ backgroundColor: '#fff', borderColor: '#e5e7eb', color: '#1f2937', fontSize: '11px', borderRadius: '6px' }} formatter={(val) => `BHD ${val.toFixed(2)}`} />
+      <YAxis stroke="#9ca3af" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `${currencySymbol} ${val}`} />
+      <Tooltip cursor={{fill: '#f3f4f6'}} contentStyle={{ backgroundColor: '#fff', borderColor: '#e5e7eb', color: '#1f2937', fontSize: '11px', borderRadius: '6px' }} formatter={(val) => `${currencySymbol} ${val.toFixed(2)}`} />
       <Bar dataKey="value" radius={[3, 3, 3, 3]} isAnimationActive={false}>
         {waterfallData.map((entry, index) => (
           <Cell key={`cell-${index}`} fill={entry.fill} />
@@ -425,7 +427,7 @@ return (
         <Pie data={expenseChartData} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={3} dataKey="value" stroke="#fff" strokeWidth={1} isAnimationActive={false}>
           {expenseChartData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
         </Pie>
-        <Tooltip contentStyle={{ backgroundColor: '#fff', borderColor: '#e5e7eb', color: '#1f2937', borderRadius: '6px', fontSize: '11px' }} formatter={(val) => `BHD ${val.toFixed(2)}`} />
+        <Tooltip contentStyle={{ backgroundColor: '#fff', borderColor: '#e5e7eb', color: '#1f2937', borderRadius: '6px', fontSize: '11px' }} formatter={(val) => `${currencySymbol} ${val.toFixed(2)}`} />
         <Legend verticalAlign="bottom" height={30} iconType="circle" wrapperStyle={{ fontSize: '9px', color: '#6b7280' }}/>
       </PieChart>
     </ResponsiveContainer>
@@ -440,7 +442,7 @@ return (
   {expenseChartData.length > 0 ? (
     <ResponsiveContainer width="100%" height="100%">
       <Treemap data={expenseChartData} dataKey="value" stroke="#fff" fill="#e5e7eb" isAnimationActive={false}>
-        <Tooltip contentStyle={{ backgroundColor: '#fff', borderColor: '#e5e7eb', color: '#1f2937', fontSize: '11px', borderRadius: '6px' }} formatter={(val) => `BHD ${val.toFixed(2)}`} />
+        <Tooltip contentStyle={{ backgroundColor: '#fff', borderColor: '#e5e7eb', color: '#1f2937', fontSize: '11px', borderRadius: '6px' }} formatter={(val) => `${currencySymbol} ${val.toFixed(2)}`} />
       </Treemap>
     </ResponsiveContainer>
   ) : (
@@ -481,14 +483,14 @@ return (
         <select value={selectedStaff} onChange={(e) => setSelectedStaff(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-blue-400 text-sm text-blue-600 font-bold">
           <option value="">-- Choose Employee --</option>
           {staffList.map(emp => (
-            <option key={emp._id} value={emp._id}>{emp.name} ({emp.role}) - Base: BHD {emp.baseSalaryBHD?.toFixed(2) || '0.00'}</option>
+            <option key={emp._id} value={emp._id}>{emp.name} ({emp.role}) - Base: {currencySymbol} {emp.baseSalaryBHD?.toFixed(2) || '0.00'}</option>
           ))}
         </select>
       </div>
     )}
 
     <input type="text" placeholder={expenseForm.type === 'Employee Salary' ? "Description (auto-fills)" : "Description"} value={expenseForm.description} onChange={e => setExpenseForm({...expenseForm, description: e.target.value})} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-blue-400 text-sm text-gray-700" required={expenseForm.type !== 'Employee Salary'} />
-    <input type="number" step="0.01" placeholder="Amount (BHD)" required value={expenseForm.amount} onChange={e => setExpenseForm({...expenseForm, amount: e.target.value})} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-blue-400 text-sm text-gray-700" />
+    <input type="number" step="0.01" placeholder={`Amount (${currencySymbol})`} required value={expenseForm.amount} onChange={e => setExpenseForm({...expenseForm, amount: e.target.value})} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-blue-400 text-sm text-gray-700" />
     
     <button type="submit" className={`w-full text-white font-bold py-2.5 rounded-lg text-xs tracking-wider uppercase transition-colors ${editingExpenseId ? 'bg-blue-600 hover:bg-blue-500' : 'bg-red-600 hover:bg-red-500'}`}>
       {editingExpenseId ? 'Update Liability' : 'Record Liability'}
@@ -509,7 +511,7 @@ return (
             <td className="px-3 py-2 text-gray-500 font-mono text-[10px]">{new Date(exp.date).toLocaleDateString()}</td>
             <td className="px-3 py-2"><span className="bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded text-[9px] text-gray-600 font-bold uppercase">{exp.type}</span></td>
             <td className="px-3 py-2 text-gray-700 font-medium">{exp.description}</td>
-            <td className="px-3 py-2 font-mono text-red-500 font-bold text-right">- BHD {exp.amount.toFixed(2)}</td>
+            <td className="px-3 py-2 font-mono text-red-500 font-bold text-right">- {currencySymbol} {exp.amount.toFixed(2)}</td>
             <td className="px-3 py-2 text-right">
               <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button onClick={() => handleEditExpense(exp)} className="text-gray-400 hover:text-blue-600 text-[9px] font-bold uppercase tracking-wider transition-colors">Edit</button>
@@ -534,9 +536,9 @@ return (
          <div className="bg-white border border-gray-200 rounded-xl p-5 font-mono text-xs font-medium shadow-sm h-fit">
   <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider font-sans mb-5 border-b border-gray-200 pb-3">Standard VAT Declaration</h3>
   <div className="divide-y divide-gray-100">
-    <div className="flex justify-between py-3 border-b border-dashed border-gray-200 text-gray-500"><span>Total Taxable Revenue</span><span className="text-gray-800">BHD {pnlData.revenue.totalGross.toFixed(2)}</span></div>
-    <div className="flex justify-between py-3 border-b border-dashed border-gray-200 text-gray-500"><span>Standard VAT (10%)</span><span className="text-red-500">BHD {pnlData.revenue.totalTax.toFixed(2)}</span></div>
-    <div className="flex justify-between py-4 mt-2 border-t-2 border-gray-300 text-sm font-bold text-gray-700 font-sans uppercase"><span>TOTAL TAX PAYABLE</span><span className="text-green-600">BHD {pnlData.revenue.totalTax.toFixed(2)}</span></div>
+    <div className="flex justify-between py-3 border-b border-dashed border-gray-200 text-gray-500"><span>Total Taxable Revenue</span><span className="text-gray-800">{currencySymbol} {pnlData.revenue.totalGross.toFixed(2)}</span></div>
+    <div className="flex justify-between py-3 border-b border-dashed border-gray-200 text-gray-500"><span>Standard VAT (10%)</span><span className="text-red-500">{currencySymbol} {pnlData.revenue.totalTax.toFixed(2)}</span></div>
+    <div className="flex justify-between py-4 mt-2 border-t-2 border-gray-300 text-sm font-bold text-gray-700 font-sans uppercase"><span>TOTAL TAX PAYABLE</span><span className="text-green-600">{currencySymbol} {pnlData.revenue.totalTax.toFixed(2)}</span></div>
   </div>
 </div>
 

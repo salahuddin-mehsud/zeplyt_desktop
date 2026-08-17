@@ -20,18 +20,34 @@ const BOTTOM_MARGIN_LINES = 4;
 
 
 function wrapText(text, maxWidth) {
+  if (!text) return [];
   const lines = [];
-  let currentLine = '';
-  const words = text.trim().split(/\s+/);
-  for (const word of words) {
-    if ((currentLine + ' ' + word).length <= maxWidth) {
-      currentLine += (currentLine ? ' ' : '') + word;
-    } else {
-      if (currentLine) lines.push(currentLine);
-      currentLine = word;
+  const rawLines = String(text).split(/\r?\n/);
+  for (const rawLine of rawLines) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) continue;
+    let currentLine = '';
+    const words = trimmed.split(/\s+/);
+    for (const word of words) {
+      if (word.length > maxWidth) {
+        if (currentLine) {
+          lines.push(currentLine);
+          currentLine = '';
+        }
+        for (let i = 0; i < word.length; i += maxWidth) {
+          lines.push(word.slice(i, i + maxWidth));
+        }
+        continue;
+      }
+      if ((currentLine + (currentLine ? ' ' : '') + word).length <= maxWidth) {
+        currentLine += (currentLine ? ' ' : '') + word;
+      } else {
+        if (currentLine) lines.push(currentLine);
+        currentLine = word;
+      }
     }
+    if (currentLine) lines.push(currentLine);
   }
-  if (currentLine) lines.push(currentLine);
   return lines;
 }
 
@@ -227,7 +243,7 @@ async function generateEscPos(order, type, settings) {
     feed(encoder);
   }
  if (order.deliveryAddress) {
-  const addressLines = wrapText(order.deliveryAddress, MAX_LINE_WIDTH);
+  const addressLines = wrapText(order.deliveryAddress, Math.max(10, MAX_LINE_WIDTH - 9));
   if (addressLines.length > 0) {
     rawText(encoder, padLine(`Address: ${addressLines[0]}`, baseAlign));
     feed(encoder);
@@ -239,6 +255,10 @@ async function generateEscPos(order, type, settings) {
 }
 if (order.type === 'Delivery' && order.driver && order.driver.name) {
   rawText(encoder, padLine(`Driver: ${order.driver.name}  ${order.driver.phone || ''}`, baseAlign));
+  feed(encoder);
+}
+if (order.waiter && order.waiter.name) {
+  rawText(encoder, padLine(`Waiter: ${order.waiter.name}${order.waiter.phone ? `  ${order.waiter.phone}` : ''}`, baseAlign));
   feed(encoder);
 }
   if (isKitchen && order.instructions) {
@@ -304,54 +324,120 @@ if (order.type === 'Delivery' && order.driver && order.driver.name) {
     printSpacing(s.sectionMargin ?? 1);
   }
 
-    // ---- Totals ----
+  // ---- Totals ----
   if (!isKitchen) {
+    const decimalPlaces = s.decimalPlaces ?? 2;
     const deliveryFee = Number(order.shippingCost ?? order.deliveryFee ?? 0);
-const discountAmount = Number(order.discountAmount ?? 0);
+    const discountAmount = Number(order.discountAmount ?? 0);
+    const subtotal = Number(order.subTotal ?? 0);
+    const finalAmount = Number(order.finalAmount ?? 0);
+    const taxBreakdown = Array.isArray(order.taxBreakdown) ? order.taxBreakdown : [];
+    const chargeBreakdown = Array.isArray(order.chargeBreakdown) ? order.chargeBreakdown : [];
 
-    if (s.totalsFormat) {
-      let formatted = s.totalsFormat
-        .replace(/{subtotal}/g, (order.subTotal ?? 0).toFixed(s.decimalPlaces ?? 2))
-        .replace(/{tax}/g, (order.taxAmount ?? 0).toFixed(s.decimalPlaces ?? 2))
-        .replace(/{discount}/g, discountAmount.toFixed(s.decimalPlaces ?? 2))
-        .replace(/{delivery}/g, deliveryFee.toFixed(s.decimalPlaces ?? 2))
-        .replace(/{total}/g, (order.finalAmount ?? 0).toFixed(s.decimalPlaces ?? 2));
-
-      // Filter out lines that contain Discount: 0.xxx or Delivery: 0.xxx, or delivery when order type isn't Delivery
-      const lines = formatted.split('\n').filter(line => {
-        const trimmed = line.trim().toLowerCase();
-        if (!trimmed) return false;
-        if (trimmed.includes('discount') && discountAmount === 0) return false;
-        if (trimmed.includes('delivery') && (deliveryFee === 0 || order.type !== 'Delivery')) return false;
-        return true;
-      });
-      lines.forEach(line => {
-        rawText(encoder, padLine(line, baseAlign));
-        feed(encoder);
-      });
-    } else {
-      // Fallback: show only if values are positive (and delivery only for Delivery orders)
-      if (s.showSubtotal !== false) {
-        rawText(encoder, padLine(`Subtotal: ${(order.subTotal ?? 0).toFixed(s.decimalPlaces ?? 2)}`, baseAlign));
-        feed(encoder);
-      }
-      if (s.showTax !== false) {
-        rawText(encoder, padLine(`Tax (${order.taxPercentage || 10}%): ${(order.taxAmount ?? 0).toFixed(s.decimalPlaces ?? 2)}`, baseAlign));
-        feed(encoder);
-      }
-      if (discountAmount > 0) {
-        rawText(encoder, padLine(`Discount: ${discountAmount.toFixed(s.decimalPlaces ?? 2)}`, baseAlign));
-        feed(encoder);
-      }
-      if (deliveryFee > 0 && order.type === 'Delivery') {
-        rawText(encoder, padLine(`Delivery: ${deliveryFee.toFixed(s.decimalPlaces ?? 2)}`, baseAlign));
-        feed(encoder);
-      }
-      if (s.showTotal !== false) {
-        rawText(encoder, padLine(`TOTAL: ${(order.finalAmount ?? 0).toFixed(s.decimalPlaces ?? 2)}`, baseAlign));
-        feed(encoder);
+    const taxLines = [];
+    if (s.showTax !== false) {
+      if (taxBreakdown.length > 0) {
+        taxBreakdown.forEach(tax => {
+          taxLines.push(`${tax.taxName || 'Tax'} (${tax.percentage || 0}%): ${Number(tax.amount || 0).toFixed(decimalPlaces)}`);
+        });
+      } else if (order.taxAmount > 0) {
+        taxLines.push(`Tax (${order.taxPercentage || 10}%): ${Number(order.taxAmount || 0).toFixed(decimalPlaces)}`);
       }
     }
+
+    const chargeLines = [];
+    if (chargeBreakdown.length > 0) {
+      chargeBreakdown.forEach(charge => {
+        const suffix = charge.chargeType === 'Fixed' ? '' : ` (${charge.percentage}%)`;
+        chargeLines.push(`${charge.chargeName || 'Charge'}${suffix}: ${Number(charge.amount || 0).toFixed(decimalPlaces)}`);
+      });
+    }
+
+    const deliveryLines = [];
+    if (deliveryFee > 0 && order.type === 'Delivery') {
+      deliveryLines.push(`Delivery: ${deliveryFee.toFixed(decimalPlaces)}`);
+    }
+
+    const discountLines = [];
+    if (discountAmount > 0) {
+      discountLines.push(`Discount: ${discountAmount.toFixed(decimalPlaces)}`);
+    }
+
+    let finalTotalLines = [];
+
+    if (s.totalsFormat) {
+      const rawLines = s.totalsFormat.split(/\r?\n/);
+      let taxesHandled = false;
+      let chargesHandled = false;
+      let deliveryHandled = false;
+      let discountHandled = false;
+
+      for (const rawLine of rawLines) {
+        const trimmed = rawLine.trim();
+        if (!trimmed) continue;
+
+        if (trimmed.includes('{taxes}') || trimmed.includes('{tax}') || trimmed.toLowerCase().startsWith('tax')) {
+          taxLines.forEach(l => finalTotalLines.push(l));
+          taxesHandled = true;
+          continue;
+        }
+        if (trimmed.includes('{charges}') || trimmed.includes('{service_charge}')) {
+          chargeLines.forEach(l => finalTotalLines.push(l));
+          chargesHandled = true;
+          continue;
+        }
+        if (trimmed.includes('{delivery}') || trimmed.toLowerCase().startsWith('delivery')) {
+          if (deliveryFee > 0 && order.type === 'Delivery') {
+            finalTotalLines.push(trimmed.replace(/{delivery}/g, deliveryFee.toFixed(decimalPlaces)));
+            deliveryHandled = true;
+          }
+          continue;
+        }
+        if (trimmed.includes('{discount}') || trimmed.toLowerCase().startsWith('discount')) {
+          if (discountAmount > 0) {
+            finalTotalLines.push(trimmed.replace(/{discount}/g, discountAmount.toFixed(decimalPlaces)));
+            discountHandled = true;
+          }
+          continue;
+        }
+
+        // Before Total line, insert any unhandled taxes/charges/delivery/discount
+        if (trimmed.includes('{total}') || trimmed.toLowerCase().startsWith('total')) {
+          if (!taxesHandled) { taxLines.forEach(l => finalTotalLines.push(l)); taxesHandled = true; }
+          if (!chargesHandled) { chargeLines.forEach(l => finalTotalLines.push(l)); chargesHandled = true; }
+          if (!discountHandled) { discountLines.forEach(l => finalTotalLines.push(l)); discountHandled = true; }
+          if (!deliveryHandled) { deliveryLines.forEach(l => finalTotalLines.push(l)); deliveryHandled = true; }
+
+          if (s.showTotal !== false) {
+            finalTotalLines.push(trimmed.replace(/{total}/g, finalAmount.toFixed(decimalPlaces)));
+          }
+          continue;
+        }
+
+        // Other lines (e.g. Subtotal)
+        let line = trimmed
+          .replace(/{subtotal}/g, subtotal.toFixed(decimalPlaces))
+          .replace(/{total}/g, finalAmount.toFixed(decimalPlaces));
+        finalTotalLines.push(line);
+      }
+
+      if (!taxesHandled) taxLines.forEach(l => finalTotalLines.push(l));
+      if (!chargesHandled) chargeLines.forEach(l => finalTotalLines.push(l));
+      if (!discountHandled) discountLines.forEach(l => finalTotalLines.push(l));
+      if (!deliveryHandled) deliveryLines.forEach(l => finalTotalLines.push(l));
+    } else {
+      if (s.showSubtotal !== false) finalTotalLines.push(`Subtotal: ${subtotal.toFixed(decimalPlaces)}`);
+      taxLines.forEach(l => finalTotalLines.push(l));
+      chargeLines.forEach(l => finalTotalLines.push(l));
+      discountLines.forEach(l => finalTotalLines.push(l));
+      deliveryLines.forEach(l => finalTotalLines.push(l));
+      if (s.showTotal !== false) finalTotalLines.push(`TOTAL: ${finalAmount.toFixed(decimalPlaces)}`);
+    }
+
+    finalTotalLines.forEach(line => {
+      rawText(encoder, padLine(line, baseAlign));
+      feed(encoder);
+    });
   }
   printSpacing(s.sectionMargin ?? 1);
 

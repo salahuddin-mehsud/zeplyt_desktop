@@ -1,8 +1,10 @@
 // src/pages/CRM.jsx
 import { useEffect, useState } from 'react';
 import api from '../services/api';
+import useCurrency from '../hooks/useCurrency';
 
 const CRM = () => {
+  const { currencySymbol } = useCurrency();
   const [data, setData] = useState({ customers: [], top3: [] });
   const [loading, setLoading] = useState(true);
 
@@ -96,7 +98,7 @@ const CRM = () => {
                     <td className="p-2 text-gray-800 font-bold">{c.name}</td>
                     <td className="p-2 text-gray-500 font-mono">{c.phone}</td>
                     <td className="p-2 text-gray-700 text-center font-bold">{c.totalOrders}</td>
-                    <td className="p-2 text-green-600 font-mono text-right font-bold">${c.totalSpent.toFixed(2)}</td>
+                    <td className="p-2 text-green-600 font-mono text-right font-bold">{currencySymbol} {c.totalSpent.toFixed(2)}</td>
                     <td className="p-2 text-blue-600 font-mono text-right font-bold bg-blue-50/50 group-hover:bg-blue-100/50 transition-colors">
                       {c.loyaltyPoints.toLocaleString()}
                     </td>

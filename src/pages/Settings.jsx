@@ -63,6 +63,10 @@ const Settings = () => {
   const [userLevel, setUserLevel] = useState(1);
   const [planName, setPlanName] = useState("Essential");
   const [taxRate, setTaxRate] = useState(0);
+  const [taxes, setTaxes] = useState([]);
+  const [newTax, setNewTax] = useState({ taxName: "", percentage: "", itemPricing: "Exclusive" });
+  const [charges, setCharges] = useState([]);
+  const [newCharge, setNewCharge] = useState({ chargeName: "", chargeType: "Percentage", value: "", itemPricing: "Exclusive", orderTypes: [] });
   const [addons, setAddons] = useState({ performanceMetrics: false });
 
   const [branches, setBranches] = useState([]);
@@ -97,12 +101,15 @@ const Settings = () => {
     customProducts: [],
   });
 
-  useEffect(() => {
+  const [activeBranchData, setActiveBranchData] = useState(null);
+
+  const fetchSettings = () => {
     api
       .get("/dashboard/settings/operating-hours")
       .then((res) => {
         setUserLevel(res.data.userLevel);
         setPlanName(res.data.planName);
+        if (res.data.branch) setActiveBranchData(res.data.branch);
         if (res.data.settings?.addons) setAddons(res.data.settings.addons);
         if (res.data.settings?.location) {
           const loc = res.data.settings.location;
@@ -111,22 +118,40 @@ const Settings = () => {
             "USD",
             "EUR",
             "GBP",
+            "PKR",
+            "INR",
             "BHD",
             "SAR",
             "AED",
+            "KWD",
+            "CAD",
+            "AUD",
           ].includes(currency);
           setLocation({ ...loc, currency, customCurrency });
         }
         if (res.data.settings) {
           setTaxRate(res.data.settings.taxRate ?? 0);
+          setTaxes(res.data.settings.taxes ?? []);
+          setCharges(res.data.settings.charges ?? []);
         }
       })
       .catch(console.error);
+  };
 
+  useEffect(() => {
+    fetchSettings();
     if (isPrivileged) {
       fetchBranchesAndUsers();
     }
-  }, [isPrivileged]);
+  }, [isPrivileged, activeBranchId]);
+
+  useEffect(() => {
+    const handleBranchChange = () => {
+      fetchSettings();
+    };
+    window.addEventListener('branchChanged', handleBranchChange);
+    return () => window.removeEventListener('branchChanged', handleBranchChange);
+  }, []);
 
   const fetchBranchesAndUsers = async () => {
     try {
@@ -193,25 +218,118 @@ const Settings = () => {
 
   const handleStoreSettingsSave = async (e) => {
     e.preventDefault();
-    if (userLevel < 2)
-      return alert(
-        "Upgrade to Professional or higher to unlock these features.",
-      );
     setLoading(true);
     try {
-      await api.post("/dashboard/settings/operating-hours", {
+      const response = await api.post("/dashboard/settings/operating-hours", {
         addons,
         location,
         taxRate,
+        taxes,
+        charges,
+        branchId: activeBranchId || loggedInUser.branchId,
       });
       setMessage({
         type: "success",
         text: "Store settings updated successfully!",
       });
+      window.dispatchEvent(new CustomEvent('currencyChanged', { detail: { currency: location.currency || "USD" } }));
+      if (response.data?.taxes) setTaxes(response.data.taxes);
+      if (response.data?.charges) setCharges(response.data.charges);
     } catch (err) {
-      setMessage({ type: "error", text: "Failed to update settings" });
+      setMessage({ type: "error", text: err.response?.data?.message || "Failed to update settings" });
     }
     setLoading(false);
+  };
+
+  const saveTaxes = async (nextTaxes) => {
+    const response = await api.post("/dashboard/settings/operating-hours", { 
+      taxes: nextTaxes,
+      branchId: activeBranchId || loggedInUser.branchId
+    });
+    setTaxes(response.data.taxes ?? nextTaxes);
+    window.dispatchEvent(new CustomEvent('taxesChanged', { detail: { taxes: response.data.taxes ?? nextTaxes } }));
+  };
+
+  const addTax = async () => {
+    const taxName = newTax.taxName.trim();
+    const percentage = Number(newTax.percentage);
+    if (!taxName || !Number.isFinite(percentage) || percentage < 0) {
+      setMessage({ type: "error", text: "Enter a tax name and a valid percentage." });
+      return;
+    }
+    const nextTaxes = [...taxes, { taxName, percentage, itemPricing: newTax.itemPricing, createdAt: new Date().toISOString() }];
+    setLoading(true);
+    try {
+      await saveTaxes(nextTaxes);
+      setNewTax({ taxName: "", percentage: "", itemPricing: "Exclusive" });
+      setMessage({ type: "success", text: "Tax added successfully for this branch." });
+    } catch (err) {
+      setMessage({ type: "error", text: "Failed to save tax." });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteTax = async (index) => {
+    const nextTaxes = taxes.filter((_, taxIndex) => taxIndex !== index);
+    setLoading(true);
+    try {
+      await saveTaxes(nextTaxes);
+      setMessage({ type: "success", text: "Tax deleted successfully." });
+    } catch (err) {
+      setMessage({ type: "error", text: "Failed to delete tax." });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveCharges = async (nextCharges) => {
+    const response = await api.post("/dashboard/settings/operating-hours", { 
+      charges: nextCharges,
+      branchId: activeBranchId || loggedInUser.branchId
+    });
+    setCharges(response.data.charges ?? nextCharges);
+    window.dispatchEvent(new CustomEvent('chargesChanged', { detail: { charges: response.data.charges ?? nextCharges } }));
+  };
+
+  const addCharge = async () => {
+    const chargeName = newCharge.chargeName.trim();
+    const value = Number(newCharge.value);
+    if (!chargeName || !Number.isFinite(value) || value < 0) {
+      setMessage({ type: "error", text: "Enter a charge name and a valid amount." });
+      return;
+    }
+    setLoading(true);
+    try {
+      const isFixed = newCharge.chargeType === "Fixed";
+      await saveCharges([...charges, {
+        chargeName,
+        chargeType: newCharge.chargeType,
+        percentage: isFixed ? 0 : value,
+        amount: isFixed ? value : 0,
+        itemPricing: newCharge.itemPricing,
+        orderTypes: newCharge.orderTypes,
+        createdAt: new Date().toISOString()
+      }]);
+      setNewCharge({ chargeName: "", chargeType: "Percentage", value: "", itemPricing: "Exclusive", orderTypes: [] });
+      setMessage({ type: "success", text: "Charge added successfully for this branch." });
+    } catch (err) {
+      setMessage({ type: "error", text: "Failed to save charge." });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteCharge = async (index) => {
+    setLoading(true);
+    try {
+      await saveCharges(charges.filter((_, chargeIndex) => chargeIndex !== index));
+      setMessage({ type: "success", text: "Charge deleted successfully." });
+    } catch (err) {
+      setMessage({ type: "error", text: "Failed to delete charge." });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCreateBranch = async (e) => {
@@ -507,6 +625,40 @@ const Settings = () => {
         {/* --- STORE SETTINGS & PRO ADD-ONS TAB --- */}
         {activeTab === "Store & Pro Add-ons" && (
           <div className="space-y-5 max-w-3xl">
+            {/* Branch Context Indicator */}
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
+              <div>
+                <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider block">
+                  Configuring Settings For Branch
+                </span>
+                <span className="text-sm font-bold text-gray-800 flex items-center gap-1.5 mt-0.5">
+                  🏢 {activeBranchData?.name || currentBranchName}
+                  {activeBranchData?.location ? ` (${activeBranchData.location})` : ""}
+                </span>
+                <p className="text-[11px] text-gray-500 mt-0.5">
+                  Currency, taxes, charges, and store location configured here apply specifically to this branch.
+                </p>
+              </div>
+              {isPrivileged && branches.length > 1 && (
+                <div className="flex items-center gap-2 shrink-0">
+                  <label className="text-xs text-gray-600 font-semibold">Branch:</label>
+                  <select
+                    value={activeBranchId || ""}
+                    onChange={(e) => {
+                      setBranch(e.target.value);
+                      setMessage({ type: "info", text: "Switched branch. Loading branch settings..." });
+                    }}
+                    className="bg-white border border-blue-300 rounded-lg px-2.5 py-1 text-xs font-semibold text-gray-800 outline-none focus:border-blue-500"
+                  >
+                    <option value="">HQ (Default / Aggregate)</option>
+                    {branches.map((b) => (
+                      <option key={b._id} value={b._id}>{b.name} ({b.location})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
             <form onSubmit={handleStoreSettingsSave} className="space-y-5">
               <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
                 <h2 className="text-sm font-bold text-gray-700 border-b border-gray-200 pb-3 mb-4 flex items-center gap-2">
@@ -547,24 +699,129 @@ const Settings = () => {
                   </div>
                 </div>
 
-{isPrivileged && (
-  <div className="mt-4 pt-4 border-t border-gray-200">
-    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
-      Global Tax Rate (%)
-    </label>
-    <input
-      type="number"
-      step="0.1"
-      min="0"
-      value={taxRate}
-      onChange={(e) => setTaxRate(parseFloat(e.target.value) || 0)}
-      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
-    />
-    <p className="text-[10px] text-gray-400 mt-1">
-      Applied to all orders (POS and website).
-    </p>
-  </div>
-)}
+                {/* Tax Management (Available to standard users and admin for branch) */}
+                <div className="mt-4 pt-4 border-t border-gray-200">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-gray-700">Tax Management</h3>
+                      <p className="text-[10px] text-gray-400 mt-0.5">Exclusive taxes are added to the total; inclusive taxes are already included in item prices.</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3">
+                    <input type="text" value={newTax.taxName} onChange={(e) => setNewTax({ ...newTax, taxName: e.target.value })} placeholder="Tax name (e.g. VAT, S.T)" className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-blue-400" />
+                    <input type="number" min="0" step="0.01" value={newTax.percentage} onChange={(e) => setNewTax({ ...newTax, percentage: e.target.value })} placeholder="Percentage (%)" className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-blue-400" />
+                    <div className="flex gap-2">
+                      <select value={newTax.itemPricing} onChange={(e) => setNewTax({ ...newTax, itemPricing: e.target.value })} className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400">
+                        <option value="Exclusive">Exclusive</option>
+                        <option value="Inclusive">Inclusive</option>
+                      </select>
+                      <button type="button" disabled={loading} onClick={addTax} className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">Add Tax</button>
+                    </div>
+                  </div>
+                  <div className="mt-3 overflow-x-auto border border-gray-200 rounded-lg">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-gray-50 text-[10px] uppercase text-gray-500">
+                        <tr>
+                          <th className="p-2">SR No.</th>
+                          <th className="p-2">Tax Name</th>
+                          <th className="p-2">Percentage</th>
+                          <th className="p-2">Item Pricing</th>
+                          <th className="p-2">Date</th>
+                          <th className="p-2">Delete</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {taxes.length ? taxes.map((tax, index) => (
+                          <tr key={tax._id || `${tax.taxName}-${index}`} className="border-t border-gray-100 text-gray-700">
+                            <td className="p-2">{index + 1}</td>
+                            <td className="p-2 font-medium">{tax.taxName}</td>
+                            <td className="p-2 font-mono">{Number(tax.percentage).toFixed(2)}%</td>
+                            <td className="p-2">
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${tax.itemPricing === 'Inclusive' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
+                                {tax.itemPricing}
+                              </span>
+                            </td>
+                            <td className="p-2 text-gray-400">{tax.createdAt ? new Date(tax.createdAt).toLocaleDateString() : "—"}</td>
+                            <td className="p-2">
+                              <button type="button" disabled={loading} onClick={() => deleteTax(index)} className="text-red-600 hover:text-red-800 disabled:text-red-300 font-bold">Delete</button>
+                            </td>
+                          </tr>
+                        )) : (
+                          <tr><td colSpan="6" className="p-3 text-center text-gray-400">No custom taxes configured for this branch.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Charges Management (Available to standard users and admin for branch) */}
+                <div className="mt-4 pt-4 border-t border-gray-200">
+                  <h3 className="text-sm font-bold text-gray-700">Charges Management</h3>
+                  <p className="text-[10px] text-gray-400 mt-0.5">Set a percentage or a fixed amount, then choose the order types it applies to. Leaving all order types unselected applies it to every order.</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mt-3">
+                    <input type="text" value={newCharge.chargeName} onChange={(e) => setNewCharge({ ...newCharge, chargeName: e.target.value })} placeholder="Charge name (e.g. Service)" className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-blue-400" />
+                    <select value={newCharge.chargeType} onChange={(e) => setNewCharge({ ...newCharge, chargeType: e.target.value })} className="bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400">
+                      <option value="Percentage">Percentage</option>
+                      <option value="Fixed">Fixed amount</option>
+                    </select>
+                    <input type="number" min="0" step="0.01" value={newCharge.value} onChange={(e) => setNewCharge({ ...newCharge, value: e.target.value })} placeholder={newCharge.chargeType === "Fixed" ? "Amount" : "Percentage (%)"} className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-blue-400" />
+                    <div className="flex gap-2">
+                      <select value={newCharge.itemPricing} onChange={(e) => setNewCharge({ ...newCharge, itemPricing: e.target.value })} className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400">
+                        <option value="Exclusive">Exclusive</option>
+                        <option value="Inclusive">Inclusive</option>
+                      </select>
+                      <button type="button" disabled={loading} onClick={addCharge} className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">Add Charge</button>
+                    </div>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-3 text-xs text-gray-600">
+                    {["Dine In", "Parcel", "Delivery"].map((orderType) => (
+                      <label key={orderType} className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={newCharge.orderTypes.includes(orderType)}
+                          onChange={(e) => setNewCharge({ ...newCharge, orderTypes: e.target.checked ? [...newCharge.orderTypes, orderType] : newCharge.orderTypes.filter((type) => type !== orderType) })}
+                        />
+                        {orderType}
+                      </label>
+                    ))}
+                  </div>
+                  <div className="mt-3 overflow-x-auto border border-gray-200 rounded-lg">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-gray-50 text-[10px] uppercase text-gray-500">
+                        <tr>
+                          <th className="p-2">SR No.</th>
+                          <th className="p-2">Charge Name</th>
+                          <th className="p-2">Value</th>
+                          <th className="p-2">Order Types</th>
+                          <th className="p-2">Item Pricing</th>
+                          <th className="p-2">Date</th>
+                          <th className="p-2">Delete</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {charges.length ? charges.map((charge, index) => (
+                          <tr key={charge._id || `${charge.chargeName}-${index}`} className="border-t border-gray-100 text-gray-700">
+                            <td className="p-2">{index + 1}</td>
+                            <td className="p-2 font-medium">{charge.chargeName}</td>
+                            <td className="p-2 font-mono">{charge.chargeType === "Fixed" ? Number(charge.amount || 0).toFixed(2) : `${Number(charge.percentage || 0).toFixed(2)}%`}</td>
+                            <td className="p-2">{charge.orderTypes?.length ? charge.orderTypes.join(", ") : "All"}</td>
+                            <td className="p-2">
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${charge.itemPricing === 'Inclusive' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
+                                {charge.itemPricing}
+                              </span>
+                            </td>
+                            <td className="p-2 text-gray-400">{charge.createdAt ? new Date(charge.createdAt).toLocaleDateString() : "—"}</td>
+                            <td className="p-2">
+                              <button type="button" disabled={loading} onClick={() => deleteCharge(index)} className="text-red-600 hover:text-red-800 disabled:text-red-300 font-bold">Delete</button>
+                            </td>
+                          </tr>
+                        )) : (
+                          <tr><td colSpan="7" className="p-3 text-center text-gray-400">No charges configured for this branch.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
 
                 <div className="mt-4 pt-4 border-t border-gray-200">
                   <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 p-3 rounded-xl relative overflow-hidden">
@@ -647,7 +904,7 @@ const Settings = () => {
                     disabled={isLocked || loading}
                     className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 rounded-lg text-xs tracking-wider uppercase transition-colors disabled:opacity-50"
                   >
-                    Save Location & Analytics
+                    Save Location & Analytics for Branch
                   </button>
                 </div>
               </div>
@@ -660,7 +917,7 @@ const Settings = () => {
               </h2>
               <div className="space-y-3">
                 <p className="text-xs text-gray-500">
-                  Choose the currency used across your POS system.
+                  Choose the currency used for this branch across your POS system.
                 </p>
                 <div className="flex items-center gap-3">
                   <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">
@@ -686,13 +943,18 @@ const Settings = () => {
                     }}
                     className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 outline-none focus:border-blue-400 w-full max-w-xs"
                   >
+                    <option value="PKR">PKR (Pakistani Rupee)</option>
                     <option value="USD">$ (US Dollar)</option>
                     <option value="EUR">€ (Euro)</option>
                     <option value="GBP">£ (British Pound)</option>
-                    <option value="BHD">BHD (Bahraini Dinar)</option>
-                    <option value="SAR">SAR (Saudi Riyal)</option>
                     <option value="AED">AED (UAE Dirham)</option>
-                    <option value="CUSTOM">✏️ Custom</option>
+                    <option value="SAR">SAR (Saudi Riyal)</option>
+                    <option value="BHD">BHD (Bahraini Dinar)</option>
+                    <option value="KWD">KWD (Kuwaiti Dinar)</option>
+                    <option value="INR">₹ (Indian Rupee)</option>
+                    <option value="CAD">C$ (Canadian Dollar)</option>
+                    <option value="AUD">A$ (Australian Dollar)</option>
+                    <option value="CUSTOM">✏️ Custom Currency</option>
                   </select>
                 </div>
                 {location.customCurrency && (
@@ -729,11 +991,13 @@ const Settings = () => {
                     try {
                       await api.post("/dashboard/settings/operating-hours", {
                         currency: location.currency || "USD",
+                        branchId: activeBranchId || loggedInUser.branchId,
                       });
                       setMessage({
                         type: "success",
-                        text: "Currency updated successfully!",
+                        text: "Branch currency updated successfully!",
                       });
+                      window.dispatchEvent(new CustomEvent('currencyChanged', { detail: { currency: location.currency || "USD" } }));
                     } catch (err) {
                       setMessage({
                         type: "error",
@@ -746,10 +1010,10 @@ const Settings = () => {
                   disabled={loading}
                   className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 rounded-lg text-xs tracking-wider uppercase transition-colors disabled:opacity-50"
                 >
-                  {loading ? "Saving..." : "Save Currency Only"}
+                  {loading ? "Saving..." : "Save Branch Currency"}
                 </button>
                 <p className="text-[10px] text-gray-400 mt-2 text-center">
-                  Saves only the currency – no location required.
+                  Saves currency specifically for this branch.
                 </p>
               </div>
             </div>
