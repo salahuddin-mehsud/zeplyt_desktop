@@ -1,6 +1,7 @@
 // src/services/api.js
 import axios from 'axios';
 import { cacheResponse, cachedResponse } from './offlineStore';
+import { logout } from './auth';
 
 const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 console.log('🔍 VITE_API_URL:', import.meta.env.VITE_API_URL, '=> using baseURL:', baseURL);
@@ -8,21 +9,18 @@ const api = axios.create({
   baseURL,
 });
 
-// Public routes that don't need authentication
-const publicRoutes = ['/api/data', '/api/packages', '/api/auth', '/api/public', '/api/webhook'];
-
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   const activeBranch = localStorage.getItem('activeBranch');
-  if (activeBranch && !config.url.includes('/ai/') && !config.url.includes('/website/') && !config.url.includes('/public/')) {
+  if (activeBranch && !config.url?.includes('/ai/') && !config.url?.includes('/website/') && !config.url?.includes('/public/')) {
     config.headers['X-Branch-Id'] = activeBranch;
   }
   return config;
 });
 
 // Cache successful reads for every desktop screen (catalog, dashboard,
-// analytics, settings, etc.).  When the network drops Axios receives the last
+// analytics, settings, etc.). When the network drops Axios receives the last
 // known response instead of leaving the POS blank.
 api.interceptors.response.use(
   (response) => {
@@ -30,6 +28,16 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
+    if (error.response && error.response.status === 401) {
+      const isAuthUrl = error.config?.url?.includes('/auth/login') || error.config?.url?.includes('/auth/forgot-password');
+      if (!isAuthUrl) {
+        logout();
+        if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+          window.location.href = '/login';
+        }
+      }
+    }
+
     const config = error.config;
     if (config?.method?.toLowerCase() === 'get' && !error.response) {
       const data = cachedResponse(config.url);

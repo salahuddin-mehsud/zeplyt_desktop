@@ -287,7 +287,7 @@ export function generateReceiptHTML(order, type = 'kitchen', settings) {
       <p style="margin:0; padding:0;">Type: ${orderType} ${table?.name ? `- ${table.name}` : ''}</p>
       ${showDateTime !== false ? `<p style="margin:0; padding:0;">${type === 'kitchen' ? 'Time' : 'Date'}: ${type === 'kitchen' ? new Date(createdAt).toLocaleTimeString() : new Date(createdAt).toLocaleString()}</p>` : ''}
       ${showCustomerName !== false ? `<p style="margin:0; padding:0;">${customerLabel} ${customerName || 'Walk-in'}</p>` : ''}
-      ${order.waiter?.name ? `<p style="margin:0; padding:0;">Waiter: ${order.waiter.name}${order.waiter.phone ? ` (${order.waiter.phone})` : ''}</p>` : ''}
+      ${order.waiter?.name ? `<p style="margin:0; padding:0;">Waiter: ${order.waiter.name}</p>` : ''}
       ${addressLines.length > 0 ? `<p style="margin:0; padding:0;">Address: ${addressLines[0]}</p>` : ''}
 ${addressLines.slice(1).map(line => `<p style="margin:0; padding:0; padding-left: 2em;">${line}</p>`).join('')}
       ${showDivider !== false ? '<hr style="margin:0.5mm 0; border:0; border-top:1px solid #000;"/>' : ''}

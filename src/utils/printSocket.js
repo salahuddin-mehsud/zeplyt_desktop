@@ -75,7 +75,7 @@ export async function connectPrintSocket() {
   socket.on('connect', () => {
     console.log(`[SOCKET] ✅ Connected (id: ${socket.id}) with groupId: ${groupId || 'none'}`);
   });
-  socket.on('connect_error', (err) => console.error('[SOCKET] ❌ Connection error:', err.message));
+  socket.on('connect_error', (err) => console.warn('[SOCKET] Offline / connection waiting:', err.message));
   socket.on('disconnect', (reason) => console.warn('[SOCKET] ⚠️ Disconnected:', reason));
 
   socket.on('print_order', async ({ order, printType }) => {

@@ -11,6 +11,7 @@ import PrivateRoute from './components/PrivateRoute';
 import Orders from './pages/Orders';
 import ManageCategories from './pages/ManageCategories';
 import ManageProducts from './pages/ManageProducts';
+import ManageDeals from './pages/ManageDeals';
 import ManageDineIn from './pages/ManageDineIn'; 
 import Tables from './pages/Tables';
 import Inventory from './pages/Inventory';
@@ -26,6 +27,8 @@ import SuperAdmin from './pages/SuperAdmin';
 import WebsiteOverview from './pages/WebsiteOverview';
 import Developers from './pages/Developers';
 import ZeplytAi from './pages/ZeplytAi';
+import DeliveryPortal from './pages/DeliveryPortal';
+import Reports from './pages/Reports';
 
 // Listener component that triggers refetch on branch change
 const BranchChangeListener = ({ children }) => {
@@ -71,9 +74,30 @@ const handleMouseDown = (e) => {
     document.removeEventListener('mousedown', handleMouseDown, true);
   };
 }, []);
-  
 
   return children;
+};
+
+// Automatically route authenticated users to dashboard upon opening the desktop app
+const RootRoute = () => {
+  const token = localStorage.getItem('token');
+  const userStr = localStorage.getItem('user');
+
+  if (token && userStr) {
+    try {
+      const user = JSON.parse(userStr);
+      if (user?.role === 'delivery') {
+        return <Navigate to="/dashboard/delivery" replace />;
+      } else if (user?.role === 'waiter') {
+        return <Navigate to="/dashboard/orders" replace />;
+      }
+      return <Navigate to="/dashboard" replace />;
+    } catch {
+      // ignore invalid user JSON
+    }
+  }
+
+  return <Login />;
 };
 
 function AppContent() {
@@ -81,7 +105,8 @@ function AppContent() {
     <BranchChangeListener>
       <Routes>
         <Route element={<PublicLayout />}>
-          <Route path="/" element={<Login />} />
+          <Route path="/" element={<RootRoute />} />
+          <Route path="/login" element={<RootRoute />} />
         </Route>
 
         <Route path="/menu/:userId/:tableId" element={<DigitalMenu />} />
@@ -92,8 +117,10 @@ function AppContent() {
           <Route path="/settings/developers" element={<Developers />} />
           <Route path="/dashboard/super-admin" element={<SuperAdmin />} />
           <Route path="/dashboard/orders" element={<Orders />} />
+          <Route path="/dashboard/delivery" element={<DeliveryPortal />} />
           <Route path="/dashboard/categories" element={<ManageCategories />} />
           <Route path="/dashboard/products" element={<ManageProducts />} />
+          <Route path="/dashboard/deals" element={<ManageDeals />} />
           <Route path="/dashboard/dine-in" element={<ManageDineIn />} /> 
           <Route path="/dashboard/operating-hours" element={<OperatingHours />} />
           <Route path="/dashboard/tables" element={<Tables />} />
@@ -109,6 +136,8 @@ function AppContent() {
           {/* 🚨 UPDATED: New Setting Routes */}
           <Route path="/settings/general" element={<Settings />} />
           <Route path="/settings/peripherals" element={<Peripherals />} />
+          <Route path="/settings/reports" element={<Reports />} />
+          <Route path="/dashboard/reports" element={<Navigate to="/settings/reports" replace />} />
           <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
         </Route>
 

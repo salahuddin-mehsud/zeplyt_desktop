@@ -67,7 +67,7 @@ const Settings = () => {
   const [newTax, setNewTax] = useState({ taxName: "", percentage: "", itemPricing: "Exclusive" });
   const [charges, setCharges] = useState([]);
   const [newCharge, setNewCharge] = useState({ chargeName: "", chargeType: "Percentage", value: "", itemPricing: "Exclusive", orderTypes: [] });
-  const [addons, setAddons] = useState({ performanceMetrics: false });
+  const [addons, setAddons] = useState({ performanceMetrics: true });
 
   const [branches, setBranches] = useState([]);
   const [subUsers, setSubUsers] = useState([]);
@@ -78,6 +78,33 @@ const Settings = () => {
     role: "user",
     branchId: "",
   });
+  const [staffForm, setStaffForm] = useState({
+    name: "",
+    email: "",
+    password: "123456",
+    phone: "",
+    address: "",
+    role: "waiter",
+    branchId: "",
+  });
+
+  const [staffWithStats, setStaffWithStats] = useState([]);
+  const [staffRoleFilter, setStaffRoleFilter] = useState("all");
+  const [staffTimelineFilter, setStaffTimelineFilter] = useState("all");
+  const [staffStartDate, setStaffStartDate] = useState("");
+  const [staffEndDate, setStaffEndDate] = useState("");
+  const [staffSearchQuery, setStaffSearchQuery] = useState("");
+  const [editingStaff, setEditingStaff] = useState(null);
+  const [editStaffForm, setEditStaffForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    phone: "",
+    address: "",
+    role: "waiter",
+    branchId: "",
+  });
+  const [showEditStaffModal, setShowEditStaffModal] = useState(false);
 
   const [webForm, setWebForm] = useState({
     customDomain: "",
@@ -103,14 +130,37 @@ const Settings = () => {
 
   const [activeBranchData, setActiveBranchData] = useState(null);
 
+  const fetchBranchesAndUsers = async () => {
+    try {
+      if (isPrivileged) {
+        const branchesRes = await api.get("/business/branches");
+        setBranches(branchesRes.data);
+        if (!activeBranchId && branchesRes.data.length > 0) {
+          const firstBranchId = branchesRes.data[0]._id;
+          setBranch(firstBranchId);
+        }
+      }
+      const usersRes = await api.get("/business/users");
+      setSubUsers(usersRes.data);
+    } catch (err) {
+      console.error("Failed to fetch branch/user data", err);
+    }
+  };
+
   const fetchSettings = () => {
     api
-      .get("/dashboard/settings/operating-hours")
+      .get("/dashboard/settings/operating-hours", {
+        params: activeBranchId ? { branchId: activeBranchId } : {}
+      })
       .then((res) => {
         setUserLevel(res.data.userLevel);
         setPlanName(res.data.planName);
         if (res.data.branch) setActiveBranchData(res.data.branch);
-        if (res.data.settings?.addons) setAddons(res.data.settings.addons);
+        if (res.data.settings?.addons) {
+          setAddons(res.data.settings.addons);
+        } else {
+          setAddons({ performanceMetrics: false });
+        }
         if (res.data.settings?.location) {
           const loc = res.data.settings.location;
           const currency = res.data.settings.currency || "USD";
@@ -140,9 +190,7 @@ const Settings = () => {
 
   useEffect(() => {
     fetchSettings();
-    if (isPrivileged) {
-      fetchBranchesAndUsers();
-    }
+    fetchBranchesAndUsers();
   }, [isPrivileged, activeBranchId]);
 
   useEffect(() => {
@@ -152,29 +200,6 @@ const Settings = () => {
     window.addEventListener('branchChanged', handleBranchChange);
     return () => window.removeEventListener('branchChanged', handleBranchChange);
   }, []);
-
-  const fetchBranchesAndUsers = async () => {
-    try {
-      const [branchesRes, usersRes] = await Promise.all([
-        api.get("/business/branches"),
-        api.get("/business/users"),
-      ]);
-      setBranches(branchesRes.data);
-      setSubUsers(usersRes.data);
-
-      if (!activeBranchId && branchesRes.data.length > 0) {
-        const firstBranchId = branchesRes.data[0]._id;
-        setBranch(firstBranchId);
-        setMessage({
-          type: "info",
-          text: `Auto‑selected branch: ${branchesRes.data[0].name}. Reloading...`,
-        });
-        setTimeout(() => window.location.reload(), 1500);
-      }
-    } catch (err) {
-      console.error("Failed to fetch branch data", err);
-    }
-  };
 
   const isLocked = userLevel < 2;
 
@@ -221,7 +246,7 @@ const Settings = () => {
     setLoading(true);
     try {
       const response = await api.post("/dashboard/settings/operating-hours", {
-        addons,
+        addons: { ...(addons || {}), performanceMetrics: true },
         location,
         taxRate,
         taxes,
@@ -235,6 +260,12 @@ const Settings = () => {
       window.dispatchEvent(new CustomEvent('currencyChanged', { detail: { currency: location.currency || "USD" } }));
       if (response.data?.taxes) setTaxes(response.data.taxes);
       if (response.data?.charges) setCharges(response.data.charges);
+      if (response.data?.addons) setAddons(response.data.addons);
+      if (response.data?.location) {
+        const loc = response.data.location;
+        const currency = response.data.currency || location.currency || "USD";
+        setLocation((prev) => ({ ...prev, ...loc, currency }));
+      }
     } catch (err) {
       setMessage({ type: "error", text: err.response?.data?.message || "Failed to update settings" });
     }
@@ -366,6 +397,153 @@ const Settings = () => {
     setLoading(false);
   };
 
+  const getDateRangeForFilter = (filterType, start, end) => {
+    const now = new Date();
+    if (filterType === "today") {
+      const todayStr = now.toISOString().split("T")[0];
+      return { startDate: `${todayStr}T00:00:00.000Z`, endDate: `${todayStr}T23:59:59.999Z` };
+    }
+    if (filterType === "yesterday") {
+      const yest = new Date(now);
+      yest.setDate(yest.getDate() - 1);
+      const yestStr = yest.toISOString().split("T")[0];
+      return { startDate: `${yestStr}T00:00:00.000Z`, endDate: `${yestStr}T23:59:59.999Z` };
+    }
+    if (filterType === "this_week") {
+      const weekStart = new Date(now);
+      weekStart.setDate(weekStart.getDate() - 7);
+      return { startDate: weekStart.toISOString(), endDate: now.toISOString() };
+    }
+    if (filterType === "this_month") {
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { startDate: monthStart.toISOString(), endDate: now.toISOString() };
+    }
+    if (filterType === "custom") {
+      return {
+        startDate: start ? new Date(start).toISOString() : "",
+        endDate: end ? new Date(end + "T23:59:59.999Z").toISOString() : ""
+      };
+    }
+    return { startDate: "", endDate: "" };
+  };
+
+  const fetchStaffWithStats = async () => {
+    try {
+      const { startDate, endDate } = getDateRangeForFilter(staffTimelineFilter, staffStartDate, staffEndDate);
+      const params = {};
+      if (startDate) params.startDate = startDate;
+      if (endDate) params.endDate = endDate;
+      if (activeBranchId) params.branchId = activeBranchId;
+      if (staffRoleFilter !== "all") params.role = staffRoleFilter;
+
+      const res = await api.get("/business/staff/stats", { params });
+      setStaffWithStats(res.data || []);
+    } catch (err) {
+      console.error("Failed to fetch staff stats", err);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "Staff Accounts") {
+      fetchStaffWithStats();
+    }
+  }, [activeTab, staffTimelineFilter, staffStartDate, staffEndDate, staffRoleFilter, activeBranchId]);
+
+  const handleCreateStaff = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const res = await api.post("/business/users", {
+        name: staffForm.name,
+        email: staffForm.email,
+        password: staffForm.password || "123456",
+        phone: staffForm.phone,
+        address: staffForm.address,
+        role: staffForm.role || "waiter",
+        branchId: staffForm.branchId || activeBranchId || loggedInUser.branchId
+      });
+      setSubUsers([...subUsers, res.data]);
+      setStaffForm({
+        name: "",
+        email: "",
+        password: "123456",
+        phone: "",
+        address: "",
+        role: "waiter",
+        branchId: "",
+      });
+      setMessage({
+        type: "success",
+        text: `${res.data.role === 'delivery' ? 'Delivery Driver' : 'Waiter'} account created successfully!`,
+      });
+      fetchStaffWithStats();
+    } catch (err) {
+      setMessage({
+        type: "error",
+        text: err.response?.data?.message || "Failed to create staff account.",
+      });
+    }
+    setLoading(false);
+  };
+
+  const openEditStaffModal = (w) => {
+    setEditingStaff(w);
+    setEditStaffForm({
+      name: w.name || "",
+      email: w.email || "",
+      password: "",
+      phone: w.phone || "",
+      address: w.address || "",
+      role: w.role || "waiter",
+      branchId: w.branchId?._id || w.branchId || "",
+    });
+    setShowEditStaffModal(true);
+  };
+
+  const closeEditStaffModal = () => {
+    setShowEditStaffModal(false);
+    setEditingStaff(null);
+    setEditStaffForm({ name: "", email: "", password: "", phone: "", address: "", role: "waiter", branchId: "" });
+  };
+
+  const handleUpdateStaff = async (e) => {
+    e.preventDefault();
+    if (!editingStaff) return;
+    setLoading(true);
+    try {
+      const payload = { ...editStaffForm };
+      if (!payload.password) delete payload.password;
+      const res = await api.put(`/business/users/${editingStaff._id}`, payload);
+      setSubUsers(subUsers.map(u => u._id === editingStaff._id ? res.data : u));
+      setMessage({ type: "success", text: `${res.data.role === 'delivery' ? 'Driver' : 'Waiter'} updated successfully!` });
+      closeEditStaffModal();
+      fetchStaffWithStats();
+    } catch (err) {
+      setMessage({
+        type: "error",
+        text: err.response?.data?.message || "Failed to update staff member.",
+      });
+    }
+    setLoading(false);
+  };
+
+  const handleDeleteStaff = async (staffId) => {
+    if (!window.confirm("Are you sure you want to delete this staff account? This action cannot be undone.")) return;
+    setLoading(true);
+    try {
+      await api.delete(`/business/users/${staffId}`);
+      setSubUsers(subUsers.filter(u => u._id !== staffId));
+      setStaffWithStats(staffWithStats.filter(w => w._id !== staffId));
+      setMessage({ type: "success", text: "Staff account deleted successfully!" });
+    } catch (err) {
+      setMessage({
+        type: "error",
+        text: err.response?.data?.message || "Failed to delete staff account.",
+      });
+    }
+    setLoading(false);
+  };
+
   const openEditModal = (branch) => {
     setEditingBranch(branch);
     setEditBranchForm({ name: branch.name, location: branch.location });
@@ -451,6 +629,7 @@ const Settings = () => {
     try {
       await api.delete(`/business/users/${userId}`);
       setSubUsers(subUsers.filter((u) => u._id !== userId));
+      setWaitersWithStats(waitersWithStats.filter((w) => w._id !== userId));
       setMessage({ type: "success", text: "User deleted successfully!" });
     } catch (err) {
       setMessage({
@@ -485,7 +664,7 @@ const Settings = () => {
               "Store & Pro Add-ons",
               "Payment Methods",
               "Credentials",
-              ...(isPrivileged ? ["Branch & Team"] : []),
+              ...(isPrivileged ? ["Branch & Team", "Staff Accounts"] : ["Staff Accounts"]),
             ].map((tab) => (
               <button
                 key={tab}
@@ -823,7 +1002,8 @@ const Settings = () => {
                   </div>
                 </div>
 
-                <div className="mt-4 pt-4 border-t border-gray-200">
+                {/* Weather live auto-sync notification (Disabled temporarily - uncomment to reactivate) */}
+                {/* <div className="mt-4 pt-4 border-t border-gray-200">
                   <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 p-3 rounded-xl relative overflow-hidden">
                     <div className="absolute top-0 right-0 p-2 opacity-10 text-5xl pointer-events-none">
                       ☁️
@@ -842,7 +1022,7 @@ const Settings = () => {
                       </p>
                     </div>
                   </div>
-                </div>
+                </div> */}
               </div>
 
               {/* Advanced Analytics */}
@@ -881,21 +1061,10 @@ const Settings = () => {
                         Weather-Based Prediction.
                       </p>
                     </div>
-                    <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1">
-                      <input
-                        type="checkbox"
-                        checked={addons.performanceMetrics}
-                        onChange={(e) =>
-                          setAddons({
-                            ...addons,
-                            performanceMetrics: e.target.checked,
-                          })
-                        }
-                        disabled={isLocked}
-                        className="sr-only peer"
-                      />
-                      <div className="w-9 h-5 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-                    </label>
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs font-bold shrink-0 shadow-sm">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                      Active / Included
+                    </div>
                   </div>
                 </div>
                 <div className="mt-5 pt-4 border-t border-gray-200">
@@ -1149,10 +1318,11 @@ const Settings = () => {
                         className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
                       >
                         <option value="user">Standard User</option>
+                        <option value="waiter">Waiter</option>
                         {isSuperAdmin && <option value="admin">Admin</option>}
                       </select>
                     </div>
-                    {userForm.role === "user" && (
+                    {(userForm.role === "user" || userForm.role === "waiter") && (
                       <div>
                         <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
                           Assign Branch
@@ -1248,7 +1418,7 @@ const Settings = () => {
                         <p className="text-[10px] text-gray-400 uppercase tracking-wider">
                           {u.role}{" "}
                           {u.branchId
-                            ? `• ${u.branchId.name}`
+                            ? `• ${u.branchId.name || u.branchName || ''}`
                             : "• Global Access"}
                         </p>
                       </div>
@@ -1340,118 +1510,647 @@ const Settings = () => {
                 </div>
               </div>
             )}
+          </div>
+        )}
 
-            {/* Edit User Modal */}
-            {showEditUserModal && editingUser && (
-              <div
-                className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-                onClick={closeEditUserModal}
-              >
-                <div
-                  className="bg-white border border-gray-200 rounded-xl max-w-md w-full p-6 shadow-xl"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <h3 className="text-base font-bold text-gray-800 mb-4">
-                    Edit User
-                  </h3>
-                  <form onSubmit={handleUpdateUser} className="space-y-4">
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
-                        Email
-                      </label>
-                      <input
-                        type="email"
-                        value={editUserForm.email}
-                        onChange={(e) =>
-                          setEditUserForm({
-                            ...editUserForm,
-                            email: e.target.value,
-                          })
-                        }
-                        className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
-                        New Password (leave blank to keep current)
-                      </label>
-                      <input
-                        type="password"
-                        value={editUserForm.password}
-                        onChange={(e) =>
-                          setEditUserForm({
-                            ...editUserForm,
-                            password: e.target.value,
-                          })
-                        }
-                        className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
-                        placeholder="••••••••"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
-                        Role
-                      </label>
-                      <select
-                        value={editUserForm.role}
-                        onChange={(e) =>
-                          setEditUserForm({
-                            ...editUserForm,
-                            role: e.target.value,
-                          })
-                        }
-                        className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
-                      >
-                        <option value="user">User</option>
-                        {isSuperAdmin && <option value="admin">Admin</option>}
-                      </select>
-                    </div>
-                    {editUserForm.role === "user" && (
-                      <div>
-                        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
-                          Assign Branch
-                        </label>
-                        <select
-                          value={editUserForm.branchId}
-                          onChange={(e) =>
-                            setEditUserForm({
-                              ...editUserForm,
-                              branchId: e.target.value,
-                            })
-                          }
-                          className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
-                          required
-                        >
-                          <option value="">Select branch</option>
-                          {branches.map((b) => (
-                            <option key={b._id} value={b._id}>
-                              {b.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-                    <div className="flex gap-3 pt-2">
-                      <button
-                        type="submit"
-                        disabled={loading}
-                        className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 rounded-lg text-xs transition-colors"
-                      >
-                        {loading ? "Saving..." : "Save Changes"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={closeEditUserModal}
-                        className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2 rounded-lg text-xs transition-colors"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </form>
+        {/* Staff Accounts Tab for All (Privileged & Standard Users) */}
+        {activeTab === "Staff Accounts" && (
+          <div className="space-y-5 max-w-5xl">
+            {/* Header Context Banner */}
+            <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 border border-blue-200 rounded-xl p-5 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold text-gray-800">
+                    Staff Accounts & Driver Operations
+                  </h2>
+                  <span className="bg-blue-600 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full">
+                    {staffWithStats.length} Total Staff
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Manage login accounts for waiters and delivery drivers, track driver availability status in real-time, and view orders processed across custom timelines.
+                </p>
+              </div>
+              <span className="bg-white border border-blue-200 text-blue-700 text-xs font-bold px-3 py-1.5 rounded-lg shrink-0 shadow-sm">
+                🏢 {activeBranchData?.name || currentBranchName}
+              </span>
+            </div>
+
+            {/* Timeline & Role Filters */}
+            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm space-y-3">
+              {/* Role Scope Filter */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-3">
+                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                  👥 Filter By Role:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { key: "all", label: "👥 All Staff" },
+                    { key: "waiter", label: "🍽️ Waiters" },
+                    { key: "delivery", label: "🛵 Delivery Drivers" },
+                  ].map((filter) => (
+                    <button
+                      key={filter.key}
+                      type="button"
+                      onClick={() => setStaffRoleFilter(filter.key)}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-colors ${
+                        staffRoleFilter === filter.key
+                          ? "bg-purple-600 text-white shadow-sm"
+                          : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                      }`}
+                    >
+                      {filter.label}
+                    </button>
+                  ))}
                 </div>
               </div>
-            )}
+
+              {/* Order Timeline Filter */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-3">
+                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                  📅 Orders Timeline:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { key: "all", label: "All Time" },
+                    { key: "today", label: "Today" },
+                    { key: "yesterday", label: "Yesterday" },
+                    { key: "this_week", label: "This Week" },
+                    { key: "this_month", label: "This Month" },
+                    { key: "custom", label: "Custom Range" },
+                  ].map((filter) => (
+                    <button
+                      key={filter.key}
+                      type="button"
+                      onClick={() => setStaffTimelineFilter(filter.key)}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-colors ${
+                        staffTimelineFilter === filter.key
+                          ? "bg-blue-600 text-white shadow-sm"
+                          : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                      }`}
+                    >
+                      {filter.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Custom Date Pickers if selected */}
+              {staffTimelineFilter === "custom" && (
+                <div className="flex flex-wrap items-center gap-3 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                  <div className="flex items-center gap-2">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase">From:</label>
+                    <input
+                      type="date"
+                      value={staffStartDate}
+                      onChange={(e) => setStaffStartDate(e.target.value)}
+                      className="bg-white border border-gray-200 rounded-md px-2.5 py-1 text-xs text-gray-800 outline-none focus:border-blue-400"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase">To:</label>
+                    <input
+                      type="date"
+                      value={staffEndDate}
+                      onChange={(e) => setStaffEndDate(e.target.value)}
+                      className="bg-white border border-gray-200 rounded-md px-2.5 py-1 text-xs text-gray-800 outline-none focus:border-blue-400"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={fetchStaffWithStats}
+                    className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded-md text-xs font-bold transition-colors"
+                  >
+                    Apply Filter
+                  </button>
+                </div>
+              )}
+
+              {/* Analytics Metric Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+                <div className="bg-blue-50/60 border border-blue-100 rounded-lg p-3">
+                  <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">Total Staff</p>
+                  <p className="text-xl font-black text-blue-900 mt-0.5">{staffWithStats.length}</p>
+                </div>
+                <div className="bg-indigo-50/60 border border-indigo-100 rounded-lg p-3">
+                  <p className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">Waiters</p>
+                  <p className="text-xl font-black text-indigo-900 mt-0.5">
+                    {staffWithStats.filter((s) => s.role === "waiter").length}
+                  </p>
+                </div>
+                <div className="bg-purple-50/60 border border-purple-100 rounded-lg p-3">
+                  <p className="text-[10px] font-bold text-purple-600 uppercase tracking-wider">Delivery Drivers</p>
+                  <p className="text-xl font-black text-purple-900 mt-0.5">
+                    {staffWithStats.filter((s) => s.role === "delivery").length}
+                  </p>
+                </div>
+                <div className="bg-emerald-50/60 border border-emerald-100 rounded-lg p-3">
+                  <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">
+                    Orders Handled
+                  </p>
+                  <p className="text-xl font-black text-emerald-900 mt-0.5">
+                    {staffWithStats.reduce((acc, w) => acc + (w.totalOrders || 0), 0)}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+              {/* Left Column: Create Staff Form (5 cols) */}
+              <div className="lg:col-span-5 bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
+                <h2 className="text-sm font-bold text-gray-700 border-b border-gray-200 pb-3 mb-4 flex items-center justify-between">
+                  <span>➕ Add Staff Account</span>
+                  <span className="text-[10px] text-gray-400 font-normal">Waiter / Driver</span>
+                </h2>
+                <form onSubmit={handleCreateStaff} className="space-y-3">
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
+                      Account Role *
+                    </label>
+                    <select
+                      value={staffForm.role || "waiter"}
+                      onChange={(e) => setStaffForm({ ...staffForm, role: e.target.value })}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 font-bold focus:border-blue-400 outline-none"
+                    >
+                      <option value="waiter">🍽️ Waiter (POS & Order Placement)</option>
+                      <option value="delivery">🛵 Delivery Driver (Driver Portal & Tracking)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
+                      Full Name *
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Alex Johnson"
+                      value={staffForm.name}
+                      onChange={(e) => setStaffForm({ ...staffForm, name: e.target.value })}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
+                      Email / Login Username *
+                    </label>
+                    <input
+                      type="email"
+                      placeholder="staff@branch.com"
+                      value={staffForm.email}
+                      onChange={(e) => setStaffForm({ ...staffForm, email: e.target.value })}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
+                      Default Password *
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 123456"
+                      value={staffForm.password}
+                      onChange={(e) => setStaffForm({ ...staffForm, password: e.target.value })}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
+                      required
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
+                        Phone Number
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. +973 33123456"
+                        value={staffForm.phone}
+                        onChange={(e) => setStaffForm({ ...staffForm, phone: e.target.value })}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
+                        Address
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Manama, Bahrain"
+                        value={staffForm.address}
+                        onChange={(e) => setStaffForm({ ...staffForm, address: e.target.value })}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {isPrivileged && (
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
+                        Assign Branch
+                      </label>
+                      <select
+                        value={staffForm.branchId || activeBranchId || ""}
+                        onChange={(e) => setStaffForm({ ...staffForm, branchId: e.target.value })}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
+                      >
+                        <option value="">Select Branch</option>
+                        {branches.map((b) => (
+                          <option key={b._id} value={b._id}>
+                            {b.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-lg text-xs transition-colors disabled:opacity-50 shadow-sm mt-2"
+                  >
+                    {loading ? "Creating..." : "Create Staff Account"}
+                  </button>
+                </form>
+              </div>
+
+              {/* Right Column: Staff Roster & Live Status (7 cols) */}
+              <div className="lg:col-span-7 bg-white border border-gray-200 rounded-xl p-5 shadow-sm flex flex-col">
+                <div className="border-b border-gray-200 pb-3 mb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <h2 className="text-sm font-bold text-gray-700 flex items-center gap-2">
+                    <span>Staff Roster</span>
+                    <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold">
+                      {staffWithStats.length} Total
+                    </span>
+                  </h2>
+                  <input
+                    type="text"
+                    placeholder="Search staff by name/email/phone..."
+                    value={staffSearchQuery}
+                    onChange={(e) => setStaffSearchQuery(e.target.value)}
+                    className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1 text-xs text-gray-800 outline-none focus:border-blue-400 w-full sm:w-56"
+                  />
+                </div>
+
+                {staffWithStats.length === 0 ? (
+                  <div className="text-center py-12 text-gray-400 flex-1 flex flex-col items-center justify-center">
+                    <span className="text-3xl mb-2">👥</span>
+                    <p className="text-xs font-bold text-gray-500">No staff accounts found.</p>
+                    <p className="text-[10px] mt-1 text-gray-400 max-w-xs">
+                      Use the form on the left to add waiter or delivery driver accounts with contact and login details.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-gray-100 max-h-[500px] overflow-y-auto space-y-2 pr-1">
+                    {staffWithStats
+                      .filter((w) => {
+                        const q = staffSearchQuery.toLowerCase();
+                        return (
+                          (w.name || "").toLowerCase().includes(q) ||
+                          (w.email || "").toLowerCase().includes(q) ||
+                          (w.phone || "").toLowerCase().includes(q) ||
+                          (w.address || "").toLowerCase().includes(q)
+                        );
+                      })
+                      .map((w) => (
+                        <div
+                          key={w._id}
+                          className="pt-3 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-gray-50/80 p-2 rounded-lg transition-colors"
+                        >
+                          <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-sm font-bold text-gray-800">
+                                {w.name || w.email}
+                              </span>
+
+                              {/* Role Badge */}
+                              <span
+                                className={`text-[9px] uppercase font-bold px-2 py-0.5 rounded border ${
+                                  w.role === "delivery"
+                                    ? "bg-purple-50 text-purple-700 border-purple-200"
+                                    : "bg-blue-50 text-blue-700 border-blue-200"
+                                }`}
+                              >
+                                {w.role === "delivery" ? "🛵 Delivery Driver" : "🍽️ Waiter"}
+                              </span>
+
+                              {/* Driver Live Availability Badge */}
+                              {w.role === "delivery" && (
+                                <span
+                                  className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
+                                    w.isBusy
+                                      ? "bg-amber-100 text-amber-800 border border-amber-300"
+                                      : "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                  }`}
+                                >
+                                  {w.isBusy
+                                    ? `🔴 Busy (Order #${w.activeOrder?.orderNo || "Active"})`
+                                    : "🟢 Available"}
+                                </span>
+                              )}
+                            </div>
+
+                            <p className="text-xs text-gray-500">📧 {w.email}</p>
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-400">
+                              {w.phone && <span>📞 {w.phone}</span>}
+                              {w.address && <span>📍 {w.address}</span>}
+                              {w.branchName && <span>🏢 {w.branchName}</span>}
+                            </div>
+                          </div>
+
+                          <div className="flex sm:flex-col items-end justify-between sm:justify-center gap-2 shrink-0">
+                            {/* Order Count Highlight */}
+                            <div className="text-right">
+                              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold text-xs shadow-xs">
+                                🛒 {w.totalOrders || 0} Orders
+                              </span>
+                              <p className="text-[9px] text-gray-400 mt-0.5 text-right">
+                                in {staffTimelineFilter.replace("_", " ")}
+                              </p>
+                            </div>
+
+                            <div className="flex gap-1.5">
+                              <button
+                                onClick={() => openEditStaffModal(w)}
+                                className="px-2.5 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-blue-100 hover:text-blue-700 transition-all text-xs font-medium"
+                              >
+                                ✏️ Edit
+                              </button>
+                              <button
+                                onClick={() => handleDeleteStaff(w._id)}
+                                className="px-2.5 py-1 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 hover:text-red-700 transition-all text-xs font-medium"
+                              >
+                                🗑️ Delete
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Dedicated Edit Staff Modal */}
+        {showEditStaffModal && editingStaff && (
+          <div
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={closeEditStaffModal}
+          >
+            <div
+              className="bg-white border border-gray-200 rounded-xl max-w-md w-full p-6 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-between items-center border-b border-gray-100 pb-3 mb-4">
+                <h3 className="text-base font-bold text-gray-800">
+                  Edit Staff ({editingStaff.name || editingStaff.email})
+                </h3>
+                <button
+                  onClick={closeEditStaffModal}
+                  className="text-gray-400 hover:text-gray-600 font-bold text-lg"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={handleUpdateStaff} className="space-y-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
+                    Account Role *
+                  </label>
+                  <select
+                    value={editStaffForm.role || "waiter"}
+                    onChange={(e) => setEditStaffForm({ ...editStaffForm, role: e.target.value })}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 font-bold focus:border-blue-400 outline-none"
+                  >
+                    <option value="waiter">🍽️ Waiter (POS & Order Placement)</option>
+                    <option value="delivery">🛵 Delivery Driver (Driver Portal & Tracking)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
+                    Full Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={editStaffForm.name}
+                    onChange={(e) => setEditStaffForm({ ...editStaffForm, name: e.target.value })}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
+                    Email / Login Username *
+                  </label>
+                  <input
+                    type="email"
+                    value={editStaffForm.email}
+                    onChange={(e) => setEditStaffForm({ ...editStaffForm, email: e.target.value })}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
+                    New Password (leave blank to keep current)
+                  </label>
+                  <input
+                    type="password"
+                    value={editStaffForm.password}
+                    onChange={(e) => setEditStaffForm({ ...editStaffForm, password: e.target.value })}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
+                    placeholder="••••••••"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
+                      Phone Number
+                    </label>
+                    <input
+                      type="text"
+                      value={editStaffForm.phone}
+                      onChange={(e) => setEditStaffForm({ ...editStaffForm, phone: e.target.value })}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
+                      Address
+                    </label>
+                    <input
+                      type="text"
+                      value={editStaffForm.address}
+                      onChange={(e) => setEditStaffForm({ ...editStaffForm, address: e.target.value })}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
+                    />
+                  </div>
+                </div>
+
+                {isPrivileged && (
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
+                      Assign Branch
+                    </label>
+                    <select
+                      value={editStaffForm.branchId}
+                      onChange={(e) => setEditStaffForm({ ...editStaffForm, branchId: e.target.value })}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
+                    >
+                      <option value="">Select Branch</option>
+                      {branches.map((b) => (
+                        <option key={b._id} value={b._id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-3">
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 rounded-lg text-xs transition-colors"
+                  >
+                    {loading ? "Saving..." : "Save Changes"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closeEditStaffModal}
+                    className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2 rounded-lg text-xs transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Global Edit User Modal (Available for both Branch & Team and Waiters tabs) */}
+        {showEditUserModal && editingUser && (
+          <div
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={closeEditUserModal}
+          >
+            <div
+              className="bg-white border border-gray-200 rounded-xl max-w-md w-full p-6 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-base font-bold text-gray-800 mb-4">
+                Edit User ({editingUser.email})
+              </h3>
+              <form onSubmit={handleUpdateUser} className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    value={editUserForm.email}
+                    onChange={(e) =>
+                      setEditUserForm({
+                        ...editUserForm,
+                        email: e.target.value,
+                      })
+                    }
+                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
+                    New Password (leave blank to keep current)
+                  </label>
+                  <input
+                    type="password"
+                    value={editUserForm.password}
+                    onChange={(e) =>
+                      setEditUserForm({
+                        ...editUserForm,
+                        password: e.target.value,
+                      })
+                    }
+                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
+                    placeholder="••••••••"
+                  />
+                </div>
+                {isPrivileged && (
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
+                      Role
+                    </label>
+                    <select
+                      value={editUserForm.role}
+                      onChange={(e) =>
+                        setEditUserForm({
+                          ...editUserForm,
+                          role: e.target.value,
+                        })
+                      }
+                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
+                    >
+                      <option value="user">Standard User</option>
+                      <option value="waiter">Waiter</option>
+                      {isSuperAdmin && <option value="admin">Admin</option>}
+                    </select>
+                  </div>
+                )}
+                {isPrivileged && (editUserForm.role === "user" || editUserForm.role === "waiter") && (
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
+                      Assign Branch
+                    </label>
+                    <select
+                      value={editUserForm.branchId}
+                      onChange={(e) =>
+                        setEditUserForm({
+                          ...editUserForm,
+                          branchId: e.target.value,
+                        })
+                      }
+                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-800 focus:border-blue-400 outline-none"
+                      required
+                    >
+                      <option value="">Select branch</option>
+                      {branches.map((b) => (
+                        <option key={b._id} value={b._id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 rounded-lg text-xs transition-colors"
+                  >
+                    {loading ? "Saving..." : "Save Changes"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closeEditUserModal}
+                    className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2 rounded-lg text-xs transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
 

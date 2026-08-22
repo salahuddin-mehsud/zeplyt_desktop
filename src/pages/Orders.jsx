@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
 import PaymentModal from "../components/PaymentModal";
@@ -13,6 +13,8 @@ const getCacheKeys = () => ({
   PRODUCTS: 'pos:products_cache',
   CATEGORIES: 'pos:categories_cache',
   PAYMENT_METHODS: 'pos:payment_methods_cache',
+  DRIVERS: 'pos:drivers_cache',
+  WAITERS: 'pos:waiters_cache',
 });
 
 // Named helpers from printer
@@ -52,6 +54,7 @@ const Orders = () => {
   const [sidebarAreaFilter, setSidebarAreaFilter] = useState("All");
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [productSearch, setProductSearch] = useState("");
+  const [selectedProductForVariant, setSelectedProductForVariant] = useState(null);
 
   // Driver selection modal
   const [isDriverModalOpen, setIsDriverModalOpen] = useState(false);
@@ -81,15 +84,27 @@ const Orders = () => {
   const [viewDetailsOrder, setViewDetailsOrder] = useState(null);
 
   const navigate = useNavigate();
+  const loggedInUser = JSON.parse(localStorage.getItem('user') || '{}');
+  const isWaiter = loggedInUser.role === 'waiter';
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    localStorage.removeItem('activeBranch');
+    navigate('/');
+  };
+
+  const [deals, setDeals] = useState([]);
 
   const fetchData = async () => {
     try {
-      const [dineRes, prodRes, catRes, payRes, ordersRes] = await Promise.all([
+      const [dineRes, prodRes, catRes, payRes, ordersRes, dealsRes] = await Promise.all([
         api.get('/pos/dine-in'),
         api.get('/pos/products'),
         api.get('/pos/categories'),
         api.get('/dashboard/settings/payment-methods'),
         api.get('/pos/orders'),
+        api.get('/pos/deals').catch(() => ({ data: [] })),
       ]);
 
       const dineData = dineRes.data || {};
@@ -98,12 +113,22 @@ const Orders = () => {
 
       setProducts(prodRes.data || []);
       setCategories(catRes.data || []);
+      setDeals(dealsRes.data || []);
 
       setPaymentMethods(payRes.data.paymentMethods || []);
 
       setOrders([...localOrders(), ...(ordersRes.data || [])]);
     } catch (err) {
       console.error('Failed to load POS data', err);
+    }
+  };
+
+  const fetchLiveOrders = async () => {
+    try {
+      const ordersRes = await api.get('/pos/orders');
+      setOrders([...localOrders(), ...(ordersRes.data || [])]);
+    } catch (err) {
+      console.error('Failed to poll live orders', err);
     }
   };
 
@@ -196,11 +221,27 @@ const Orders = () => {
       const { data } = JSON.parse(cachedPaymentMethods);
       setPaymentMethods(data || []);
     }
+    const cachedDrivers = localStorage.getItem(cacheKeys.DRIVERS);
+    if (cachedDrivers) {
+      try {
+        const { data } = JSON.parse(cachedDrivers);
+        if (Array.isArray(data) && data.length > 0) setDriverList(data);
+      } catch {}
+    }
+    const cachedWaiters = localStorage.getItem(cacheKeys.WAITERS);
+    if (cachedWaiters) {
+      try {
+        const { data } = JSON.parse(cachedWaiters);
+        if (Array.isArray(data) && data.length > 0) setWaiterList(data);
+      } catch {}
+    }
   }, []);
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 10000);
+    fetchDrivers();
+    fetchWaiters();
+    const interval = setInterval(fetchLiveOrders, 10000);
     return () => clearInterval(interval);
   }, []);
 
@@ -305,13 +346,43 @@ const Orders = () => {
   const filteredProducts =
     selectedCategory === "All"
       ? products
-      : products.filter((p) => p.category?._id === selectedCategory);
+      : selectedCategory === "deals"
+        ? []
+        : products.filter((p) => p.category?._id === selectedCategory);
 
-  const posFilteredProducts = products.filter((p) => {
-  const matchesCategory = selectedCategory === "All" || p.category?._id === selectedCategory;
-  const matchesSearch = p.name.toLowerCase().includes(productSearch.toLowerCase());
-  return matchesCategory && matchesSearch;
-});
+  const posFilteredProducts = useMemo(() => {
+    const q = productSearch.toLowerCase().trim();
+    
+    // Normalize deal items for POS grid
+    const dealItems = (deals || []).filter(d => d.inStock !== false).map(d => ({
+      _id: d._id,
+      name: d.name,
+      price: Number(d.price) || 0,
+      originalPrice: d.originalPrice,
+      imageUrl: d.imageUrl,
+      badge: d.badge || 'SPECIAL DEAL',
+      isDeal: true,
+      dealItems: d.items || [],
+      category: { _id: 'deals', name: 'Deals' }
+    }));
+
+    if (selectedCategory === "deals") {
+      return dealItems.filter(d => !q || d.name.toLowerCase().includes(q) || (d.badge && d.badge.toLowerCase().includes(q)));
+    }
+
+    const filteredProds = products.filter((p) => {
+      const matchesCategory = selectedCategory === "All" || p.category?._id === selectedCategory;
+      const matchesSearch = !q || p.name.toLowerCase().includes(q);
+      return matchesCategory && matchesSearch;
+    });
+
+    if (selectedCategory === "All") {
+      const matchedDeals = dealItems.filter(d => !q || d.name.toLowerCase().includes(q) || (d.badge && d.badge.toLowerCase().includes(q)));
+      return [...matchedDeals, ...filteredProds];
+    }
+
+    return filteredProds;
+  }, [products, deals, selectedCategory, productSearch]);
 
   const openNewOrder = (type, prefilledArea = null, prefilledTable = null) => {
   setActiveOrderId(null);
@@ -350,24 +421,101 @@ const Orders = () => {
 };
 
 
+  const getDriverAvailability = (driver) => {
+    if (!driver || !orders) return { isBusy: false, activeOrder: null };
+    const driverNameLower = (driver.name || '').trim().toLowerCase();
+    const driverEmailLower = (driver.email || '').trim().toLowerCase();
+    const driverPhoneLower = (driver.phone || driver.contact || '').trim().toLowerCase();
+
+    const activeOrder = orders.find((o) => {
+      const orderType = (o.type || '').toLowerCase();
+      const isDeliveryType = orderType.includes('delivery');
+      const isOngoing = ['open orders', 'accepted', 'cooking', 'on way'].includes(
+        (o.status || '').toLowerCase()
+      );
+      if (!isDeliveryType || !isOngoing) return false;
+      const assignedDriverName = (o.driver?.name || o.driverName || '').trim().toLowerCase();
+      const assignedDriverPhone = (o.driver?.phone || o.driverPhone || '').trim().toLowerCase();
+      return (
+        (driverNameLower && assignedDriverName === driverNameLower) ||
+        (driverEmailLower && assignedDriverName === driverEmailLower) ||
+        (driverPhoneLower && assignedDriverPhone && assignedDriverPhone === driverPhoneLower)
+      );
+    });
+    return {
+      isBusy: !!activeOrder,
+      activeOrder,
+      orderNo: activeOrder ? activeOrder.orderNo || activeOrder._id.slice(-4) : null,
+    };
+  };
+
   const fetchDrivers = async () => {
-  try {
-    const res = await api.get('/staff');
-    const drivers = res.data.filter(emp => emp.role === 'Driver');
-    setDriverList(drivers);
-  } catch (err) {
-    console.error('Failed to fetch drivers', err);
-  }
-};
+    const cacheKeys = getCacheKeys();
+    try {
+      const activeBranchId = localStorage.getItem('activeBranch') || localStorage.getItem('branchId') || '';
+      const res = await api.get('/business/users', { params: { branch: activeBranchId || undefined } });
+      const staffUsers = Array.isArray(res.data) ? res.data : (res.data?.users || []);
+      const drivers = staffUsers
+        .filter((u) => u.role === 'delivery')
+        .map((u) => ({
+          _id: u._id,
+          name: (u.name && u.name.trim()) || u.email || 'Unnamed Driver',
+          phone: u.phone || u.contact || '',
+          email: u.email || '',
+          address: u.address || '',
+          branchId: u.branchId?._id || u.branchId || '',
+          branchName: u.branchName || ''
+        }));
+      setDriverList(drivers);
+      localStorage.setItem(cacheKeys.DRIVERS, JSON.stringify({ data: drivers, cachedAt: Date.now() }));
+    } catch (err) {
+      const cached = localStorage.getItem(cacheKeys.DRIVERS);
+      if (cached) {
+        try {
+          const { data } = JSON.parse(cached);
+          if (Array.isArray(data) && data.length > 0) {
+            setDriverList(data);
+            return;
+          }
+        } catch {}
+      }
+      console.warn('Could not fetch drivers from network or cache:', err?.message || err);
+    }
+  };
 
   const fetchWaiters = async () => {
-  try {
-    const res = await api.get('/staff');
-    setWaiterList(res.data.filter(emp => emp.role === 'Waiter' && emp.status !== 'Terminated'));
-  } catch (err) {
-    console.error('Failed to fetch waiters', err);
-  }
-};
+    const cacheKeys = getCacheKeys();
+    try {
+      const activeBranchId = localStorage.getItem('activeBranch') || localStorage.getItem('branchId') || '';
+      const res = await api.get('/business/users', { params: { branch: activeBranchId || undefined } });
+      const staffUsers = Array.isArray(res.data) ? res.data : (res.data?.users || []);
+      const waiters = staffUsers
+        .filter((u) => u.role === 'waiter')
+        .map((u) => ({
+          _id: u._id,
+          name: (u.name && u.name.trim()) || u.email || 'Unnamed Waiter',
+          phone: u.phone || u.contact || '',
+          email: u.email || '',
+          address: u.address || '',
+          branchId: u.branchId?._id || u.branchId || '',
+          branchName: u.branchName || ''
+        }));
+      setWaiterList(waiters);
+      localStorage.setItem(cacheKeys.WAITERS, JSON.stringify({ data: waiters, cachedAt: Date.now() }));
+    } catch (err) {
+      const cached = localStorage.getItem(cacheKeys.WAITERS);
+      if (cached) {
+        try {
+          const { data } = JSON.parse(cached);
+          if (Array.isArray(data) && data.length > 0) {
+            setWaiterList(data);
+            return;
+          }
+        } catch {}
+      }
+      console.warn('Could not fetch waiters from network or cache:', err?.message || err);
+    }
+  };
 
   const handleMarkOnWay = (orderId) => {
     setPendingOrderId(orderId);
@@ -401,19 +549,64 @@ const Orders = () => {
     setShowPOS(true);
   };
 
-  const addToCart = (product) => {
-    setCart((prev) => {
-      const existing = prev.find((p) => p._id === product._id);
-      if (existing)
-        return prev.map((p) =>
-          p._id === product._id ? { ...p, qty: p.qty + 1 } : p,
-        );
-      return [...prev, { ...product, qty: 1 }];
-    });
+  const handleProductClick = (product) => {
+    if (product.variants && product.variants.length > 0 && !product.isDeal) {
+      setSelectedProductForVariant(product);
+    } else {
+      addToCart(product);
+    }
   };
 
-  const triggerPrint = (order, type = 'kitchen') => {
-    dispatchPrint(order, type).catch(err => console.error('[PRINT] dispatchPrint failed:', err));
+  const addToCart = (product, variant = null) => {
+    const itemKey = variant ? `${product._id}_${variant.name}` : (product.cartItemId || product._id);
+    const itemName = variant ? `${product.name} (${variant.name})` : product.name;
+    const itemPrice = variant ? Number(variant.price) : Number(product.price);
+    const variantName = variant ? variant.name : null;
+    const portionSize = variant ? (variant.portionSize || variant.name) : null;
+
+    setCart((prev) => {
+      const existing = prev.find((p) => (p.cartItemId || p._id) === itemKey);
+      if (existing)
+        return prev.map((p) =>
+          (p.cartItemId || p._id) === itemKey ? { ...p, qty: p.qty + 1 } : p,
+        );
+      return [
+        ...prev,
+        {
+          ...product,
+          cartItemId: itemKey,
+          name: itemName,
+          price: itemPrice,
+          variantName,
+          portionSize,
+          qty: 1,
+        },
+      ];
+    });
+    setSelectedProductForVariant(null);
+  };
+
+  const triggerPrint = async (order, type = 'kitchen') => {
+    const useBrowserPrint = localStorage.getItem('useBrowserPrint') === 'true';
+    console.log(`[Orders] triggerPrint: type=${type}, useBrowserPrint=${useBrowserPrint}`);
+
+    if (useBrowserPrint) {
+      // ---- BROWSER PRINT MODE ----
+      try {
+        const mode = 'browser';
+        const res = await api.get(`/pos/receipt-settings/${type}?mode=${mode}`);
+        const settings = res.data || getDefaultReceiptSettings(type);
+        printReceiptHTML(order, type, settings);
+        console.log(`[Orders] Browser print triggered for #${order.tokenNo}`);
+      } catch (err) {
+        console.error('[Orders] Browser print failed:', err);
+        const defaultSettings = getDefaultReceiptSettings(type);
+        printReceiptHTML(order, type, defaultSettings);
+      }
+    } else {
+      // ---- SILENT ETHERNET / BLUETOOTH / RELAY PRINT MODE ----
+      dispatchPrint(order, type).catch(err => console.error('[PRINT] dispatchPrint failed:', err));
+    }
   };
 
   const calculateCartTaxes = (subtotal) => {
@@ -460,6 +653,13 @@ const Orders = () => {
     if (cart.length === 0)
       return alert("Cart is empty! Add items before firing.");
 
+    // ✅ Ensure a branch is selected
+    const branchId = localStorage.getItem('activeBranch');
+    if (!branchId) {
+      alert('⚠️ Please select a branch in Settings before placing an order.');
+      return;
+    }
+
     const subTotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
     const taxDetails = calculateCartTaxes(subTotal);
     const chargeDetails = calculateCartCharges(subTotal, formType);
@@ -468,9 +668,14 @@ const Orders = () => {
     const shippingCost = formType === "Delivery" ? deliveryCost : 0;
     const finalAmount = subTotal + taxDetails.exclusiveTaxAmount + chargeDetails.exclusiveChargeAmount + shippingCost;
 
+    const useBrowserPrint = localStorage.getItem('useBrowserPrint') === 'true';
+    const printMode = useBrowserPrint ? 'browser' : 'ethernet';
+
     const items = cart.map((c) => ({
-      product: c._id,
+      product: c.isDeal ? null : c._id,
       name: c.name,
+      variantName: c.variantName || null,
+      portionSize: c.portionSize || null,
       qty: c.qty,
       price: c.price,
     }));
@@ -481,8 +686,12 @@ const Orders = () => {
         const res = await api.put(`/pos/orders/${activeOrderId}`, {
           action: "ADD_ITEMS",
           newItems: items,
+          printMode,
         });
         savedOrder = res.data;
+        if (useBrowserPrint) {
+          triggerPrint(savedOrder, "kitchen");
+        }
       } else {
         const payload = {
           ...form,
@@ -495,9 +704,13 @@ const Orders = () => {
           chargeBreakdown: chargeDetails.chargeBreakdown,
           shippingCost: shippingCost,
           finalAmount: finalAmount,
+          printMode,
         };
         const res = await api.post("/pos/orders", payload);
         savedOrder = res.data;
+        if (useBrowserPrint) {
+          triggerPrint(savedOrder, "kitchen");
+        }
       }
       setCart([]);
       setShowPOS(false);
@@ -519,6 +732,7 @@ const Orders = () => {
           chargeBreakdown: chargeDetails.chargeBreakdown,
           shippingCost,
           finalAmount,
+          printMode,
         });
         setCart([]);
         setShowPOS(false);
@@ -537,14 +751,19 @@ const Orders = () => {
 
   const handleFinalizePayment = async (paymentDetails) => {
     if (!currentOrderForPayment || !currentOrderForPayment._id) return;
+    const useBrowserPrint = localStorage.getItem('useBrowserPrint') === 'true';
     try {
       const res = await api.put(`/pos/orders/${currentOrderForPayment._id}`, {
         ...paymentDetails,
+        printMode: useBrowserPrint ? 'browser' : 'ethernet',
       });
       setIsPaymentModalOpen(false);
+      const paidOrder = res.data || { ...currentOrderForPayment, ...paymentDetails };
       setCurrentOrderForPayment(null);
       fetchData();
-      // Note: Server updateOrder automatically triggers relayPrintToStore for 'bill' when printInvoice is true
+      if (paymentDetails.printInvoice && useBrowserPrint) {
+        triggerPrint(paidOrder, 'bill');
+      }
     } catch (err) {
       if (isConnectionFailure(err)) {
         queueOfflineUpdate(currentOrderForPayment._id, paymentDetails);
@@ -629,18 +848,25 @@ const Orders = () => {
       alert("Please provide a reason for cancellation.");
       return;
     }
+    const cancelPayload = {
+      status: "Cancelled",
+      cancellationReason: cancelReason.trim(),
+    };
     try {
-      await api.put(`/pos/orders/${cancelOrderId}`, {
-        status: "Cancelled",
-        cancellationReason: cancelReason.trim(),
-      });
+      await api.put(`/pos/orders/${cancelOrderId}`, cancelPayload);
+      fetchData();
+    } catch (err) {
+      if (isConnectionFailure(err) || !navigator.onLine || !err?.response) {
+        queueOfflineUpdate(cancelOrderId, cancelPayload);
+        setOrders(current => current.map(order => order._id === cancelOrderId ? { ...order, ...cancelPayload, syncState: 'pending' } : order));
+      } else {
+        console.error("Failed to cancel order:", err);
+        alert("Failed to cancel order.");
+      }
+    } finally {
       setCancelModalOpen(false);
       setCancelOrderId(null);
       setCancelReason("");
-      fetchData();
-    } catch (err) {
-      console.error("Failed to cancel order:", err);
-      alert("Failed to cancel order.");
     }
   };
 
@@ -697,16 +923,37 @@ const Orders = () => {
       {!showPOS && (
         <>
           <div className="flex-1 p-3 md:p-4 overflow-y-auto overflow-x-hidden min-w-0">
-            <div className="flex items-center gap-3 mb-4">
-              <button
-                onClick={() => navigate("/dashboard")}
-                className="text-gray-500 hover:text-gray-700 font-bold text-xs bg-white border border-gray-200 px-3 py-1.5 rounded-lg transition-colors shadow-sm shrink-0"
-              >
-                ← Go Back
-              </button>
-              <h1 className="text-base md:text-lg font-bold tracking-tight truncate">
-                Live Orders & POS
-              </h1>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                {isWaiter ? (
+                  <button
+                    onClick={handleLogout}
+                    className="text-red-600 hover:text-red-700 font-bold text-xs bg-red-50 hover:bg-red-100 border border-red-200 px-3 py-1.5 rounded-lg transition-colors shadow-sm shrink-0 flex items-center gap-1.5"
+                  >
+                    <span>🚪</span> Log Out
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => navigate("/dashboard")}
+                    className="text-gray-500 hover:text-gray-700 font-bold text-xs bg-white border border-gray-200 px-3 py-1.5 rounded-lg transition-colors shadow-sm shrink-0"
+                  >
+                    ← Go Back
+                  </button>
+                )}
+                <h1 className="text-base md:text-lg font-bold tracking-tight truncate flex items-center gap-2">
+                  <span>Live Orders & POS</span>
+                  {isWaiter && (
+                    <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 bg-blue-100 text-blue-700 border border-blue-200 rounded-full">
+                      Waiter Mode ({loggedInUser.email})
+                    </span>
+                  )}
+                </h1>
+              </div>
+              {isWaiter && (
+                <div className="hidden sm:flex items-center text-xs text-gray-500 font-medium">
+                  Logged in as <span className="font-bold text-gray-800 ml-1">{loggedInUser.email}</span>
+                </div>
+              )}
             </div>
             <div className="max-w-[1400px] mx-auto">
               <div className="flex flex-wrap gap-2 mb-4 bg-white border border-gray-200 p-3 rounded-xl shadow-sm">
@@ -1957,8 +2204,8 @@ const Orders = () => {
                     <div className="max-h-32 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100 mt-2">
                       {waiterList.filter(w => w.name.toLowerCase().includes(waiterSearch.toLowerCase())).map(waiter => (
                         <label key={waiter._id} className="flex items-center gap-2 p-2 hover:bg-gray-50 cursor-pointer">
-                          <input type="radio" name="waiter" value={waiter._id} checked={selectedWaiterId === waiter._id} onChange={() => { setSelectedWaiterId(waiter._id); setForm(prev => ({ ...prev, waiterName: waiter.name, waiterPhone: waiter.contact || '' })); }} />
-                          <span className="text-xs font-medium">{waiter.name}</span><span className="text-[10px] text-gray-500 ml-auto">{waiter.contact || 'No phone'}</span>
+                          <input type="radio" name="waiter" value={waiter._id} checked={selectedWaiterId === waiter._id} onChange={() => { setSelectedWaiterId(waiter._id); setForm(prev => ({ ...prev, waiterName: waiter.name, waiterPhone: waiter.phone || waiter.contact || '' })); }} />
+                          <span className="text-xs font-medium">{waiter.name}</span><span className="text-[10px] text-gray-500 ml-auto">{waiter.phone || waiter.contact || waiter.email || 'No phone'}</span>
                         </label>
                       ))}
                       {waiterList.length === 0 && <p className="p-2 text-xs text-gray-400">No waiters found for this branch.</p>}
@@ -2028,31 +2275,76 @@ const Orders = () => {
     />
     <div className="max-h-32 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
       {driverList
-        .filter(d => d.name.toLowerCase().includes(deliveryDriverSearch.toLowerCase()))
-        .map(driver => (
-          <label key={driver._id} className="flex items-center gap-2 p-2 hover:bg-gray-50 cursor-pointer">
-            <input
-              type="radio"
-              name="deliveryDriver"
-              value={driver._id}
-              checked={deliverySelectedDriverId === driver._id}
-              onChange={() => {
-                setDeliverySelectedDriverId(driver._id);
-                setDeliveryOtherDriverName('');
-                setDeliveryOtherDriverPhone('');
-                setForm(prev => ({
-                  ...prev,
-                  driverName: driver.name,
-                  driverPhone: driver.contact || '',
-                }));
-              }}
-            />
-            <span className="text-xs font-medium">{driver.name}</span>
-            <span className="text-[10px] text-gray-500 ml-auto">{driver.contact || 'No phone'}</span>
-          </label>
-        ))}
-      {driverList.length === 0 && (
-        <p className="p-2 text-xs text-gray-400">No drivers found.</p>
+        .filter((d) => {
+          const q = (deliveryDriverSearch || '').toLowerCase().trim();
+          if (!q) return true;
+          return (
+            (d.name || '').toLowerCase().includes(q) ||
+            (d.email || '').toLowerCase().includes(q) ||
+            (d.phone || d.contact || '').toLowerCase().includes(q)
+          );
+        })
+        .map((driver) => {
+          const avail = getDriverAvailability(driver);
+          return (
+            <label
+              key={driver._id}
+              className="flex items-center gap-2 p-2 hover:bg-gray-50 cursor-pointer"
+            >
+              <input
+                type="radio"
+                name="deliveryDriver"
+                value={driver._id}
+                checked={deliverySelectedDriverId === driver._id}
+                onChange={() => {
+                  setDeliverySelectedDriverId(driver._id);
+                  setDeliveryOtherDriverName("");
+                  setDeliveryOtherDriverPhone("");
+                  setForm((prev) => ({
+                    ...prev,
+                    driverName: driver.name || driver.email || "",
+                    driverPhone: driver.phone || driver.contact || "",
+                  }));
+                }}
+              />
+              <div className="flex flex-col">
+                <span className="text-xs font-medium text-gray-800">
+                  {driver.name || driver.email}
+                </span>
+                <span className="text-[10px] text-gray-400">
+                  {driver.phone || driver.contact || driver.email || "No phone"}
+                </span>
+              </div>
+              <span
+                className={`ml-auto text-[9px] font-bold px-2 py-0.5 rounded-full ${
+                  avail.isBusy
+                    ? "bg-amber-100 text-amber-800 border border-amber-300"
+                    : "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                }`}
+              >
+                {avail.isBusy ? `🔴 Busy (#${avail.orderNo})` : "🟢 Available"}
+              </span>
+            </label>
+          );
+        })}
+      {driverList.length === 0 ? (
+        <p className="p-2 text-xs text-gray-400">
+          No delivery drivers found. Create driver accounts in Settings &gt; Staff Accounts.
+        </p>
+      ) : (
+        driverList.filter((d) => {
+          const q = (deliveryDriverSearch || '').toLowerCase().trim();
+          if (!q) return true;
+          return (
+            (d.name || '').toLowerCase().includes(q) ||
+            (d.email || '').toLowerCase().includes(q) ||
+            (d.phone || d.contact || '').toLowerCase().includes(q)
+          );
+        }).length === 0 && (
+          <p className="p-2 text-xs text-gray-400">
+            No matching drivers found.
+          </p>
+        )
       )}
     </div>
     <label className="flex items-center gap-2 cursor-pointer">
@@ -2189,6 +2481,16 @@ const Orders = () => {
     >
       All
     </button>
+    <button
+      onClick={() => setSelectedCategory("deals")}
+      className={`shrink-0 px-3 py-1 rounded-full text-[10px] font-bold transition-colors whitespace-nowrap flex items-center gap-1 ${
+        selectedCategory === "deals"
+          ? "bg-amber-600 text-white shadow-xs"
+          : "bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200"
+      }`}
+    >
+      🏷️ Deals & Combos ({deals.filter(d => d.inStock !== false).length})
+    </button>
     {categories.map((c) => (
       <button
         key={c._id}
@@ -2214,9 +2516,25 @@ const Orders = () => {
                 {posFilteredProducts.map((p) => (
                   <div
                     key={p._id}
-                    onClick={() => addToCart(p)}
-                    className="bg-gray-50 hover:border-blue-400 border border-gray-200 p-2.5 md:p-3 rounded-xl cursor-pointer transition-all flex flex-col items-center gap-1.5 h-36 md:h-40 group shadow-sm"
+                    onClick={() => handleProductClick(p)}
+                    className={`border p-2.5 md:p-3 rounded-xl cursor-pointer transition-all flex flex-col items-center gap-1.5 h-36 md:h-40 group shadow-xs relative overflow-hidden ${
+                      p.isDeal
+                        ? "bg-amber-50/40 hover:border-amber-400 border-amber-200"
+                        : p.variants && p.variants.length > 0
+                        ? "bg-blue-50/30 hover:border-blue-500 border-blue-200"
+                        : "bg-gray-50 hover:border-blue-400 border-gray-200"
+                    }`}
                   >
+                    {p.isDeal && (
+                      <span className="absolute top-1.5 left-1.5 bg-rose-600 text-white text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider shadow-2xs z-10">
+                        {p.badge || 'DEAL'}
+                      </span>
+                    )}
+                    {!p.isDeal && p.variants && p.variants.length > 0 && (
+                      <span className="absolute top-1.5 left-1.5 bg-blue-600 text-white text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider shadow-2xs z-10">
+                        {p.variants.length} Sizes
+                      </span>
+                    )}
                     {p.imageUrl ? (
                       <img
                         src={p.imageUrl}
@@ -2225,16 +2543,23 @@ const Orders = () => {
                       />
                     ) : (
                       <div className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-gray-200 flex items-center justify-center text-gray-400 text-[10px]">
-                        No img
+                        {p.isDeal ? "🏷️" : "No img"}
                       </div>
                     )}
                     <span className="font-bold text-xs text-gray-700 group-hover:text-gray-900 text-center leading-snug line-clamp-2">
                       {p.name}
                     </span>
-                    <span className="text-blue-600 font-bold text-xs">
-                      {currencySymbol}
-                      {p.price.toFixed(2)}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`${p.isDeal ? "text-amber-700" : "text-blue-600"} font-bold text-xs`}>
+                        {currencySymbol}
+                        {p.price.toFixed(2)}
+                      </span>
+                      {p.originalPrice > p.price && (
+                        <span className="text-[10px] text-gray-400 line-through">
+                          {currencySymbol}{Number(p.originalPrice).toFixed(2)}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -2445,28 +2770,73 @@ const Orders = () => {
           />
         </div>
 
-        <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+        <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
           {driverList
-            .filter(d => d.name.toLowerCase().includes(driverSearch.toLowerCase()))
-            .map(driver => (
-              <label key={driver._id} className="flex items-center gap-2 p-2 hover:bg-gray-50 cursor-pointer">
-                <input
-                  type="radio"
-                  name="driver"
-                  value={driver._id}
-                  checked={selectedDriverId === driver._id}
-                  onChange={() => {
-                    setSelectedDriverId(driver._id);
-                    setOtherDriverName('');
-                    setOtherDriverPhone('');
-                  }}
-                />
-                <span className="text-xs font-medium">{driver.name}</span>
-                <span className="text-[10px] text-gray-500 ml-auto">{driver.contact || 'No phone'}</span>
-              </label>
-            ))}
-          {driverList.length === 0 && (
-            <p className="p-2 text-xs text-gray-400">No drivers found. Add a driver in Staff Management.</p>
+            .filter((d) => {
+              const q = (driverSearch || '').toLowerCase().trim();
+              if (!q) return true;
+              return (
+                (d.name || '').toLowerCase().includes(q) ||
+                (d.email || '').toLowerCase().includes(q) ||
+                (d.phone || d.contact || '').toLowerCase().includes(q)
+              );
+            })
+            .map((driver) => {
+              const avail = getDriverAvailability(driver);
+              return (
+                <label
+                  key={driver._id}
+                  className="flex items-center gap-2 p-2.5 hover:bg-gray-50 cursor-pointer"
+                >
+                  <input
+                    type="radio"
+                    name="driver"
+                    value={driver._id}
+                    checked={selectedDriverId === driver._id}
+                    onChange={() => {
+                      setSelectedDriverId(driver._id);
+                      setOtherDriverName("");
+                      setOtherDriverPhone("");
+                    }}
+                  />
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-gray-800">
+                      {driver.name || driver.email}
+                    </span>
+                    <span className="text-[10px] text-gray-400">
+                      {driver.phone || driver.contact || driver.email || "No phone"}
+                    </span>
+                  </div>
+                  <span
+                    className={`ml-auto text-[9px] font-bold px-2 py-0.5 rounded-full ${
+                      avail.isBusy
+                        ? "bg-amber-100 text-amber-800 border border-amber-300"
+                        : "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                    }`}
+                  >
+                    {avail.isBusy ? `🔴 Busy (#${avail.orderNo})` : "🟢 Available"}
+                  </span>
+                </label>
+              );
+            })}
+          {driverList.length === 0 ? (
+            <p className="p-2 text-xs text-gray-400">
+              No delivery drivers found. Add driver accounts in Settings &gt; Staff Accounts.
+            </p>
+          ) : (
+            driverList.filter((d) => {
+              const q = (driverSearch || '').toLowerCase().trim();
+              if (!q) return true;
+              return (
+                (d.name || '').toLowerCase().includes(q) ||
+                (d.email || '').toLowerCase().includes(q) ||
+                (d.phone || d.contact || '').toLowerCase().includes(q)
+              );
+            }).length === 0 && (
+              <p className="p-2 text-xs text-gray-400">
+                No matching drivers found.
+              </p>
+            )
           )}
         </div>
 
@@ -2476,16 +2846,16 @@ const Orders = () => {
               type="radio"
               name="driver"
               value="other"
-              checked={selectedDriverId === 'other'}
+              checked={selectedDriverId === "other"}
               onChange={() => {
-                setSelectedDriverId('other');
-                setOtherDriverName('');
-                setOtherDriverPhone('');
+                setSelectedDriverId("other");
+                setOtherDriverName("");
+                setOtherDriverPhone("");
               }}
             />
             <span className="text-xs font-bold">Other (External Driver)</span>
           </label>
-          {selectedDriverId === 'other' && (
+          {selectedDriverId === "other" && (
             <div className="grid grid-cols-2 gap-2 mt-2">
               <input
                 type="text"
@@ -2527,22 +2897,42 @@ const Orders = () => {
             } else if (selectedDriverId) {
               const driver = driverList.find(d => d._id === selectedDriverId);
               if (driver) {
-                driverName = driver.name;
-                driverPhone = driver.contact || '';
+                driverName = driver.name || driver.email || '';
+                driverPhone = driver.phone || driver.contact || '';
               }
             } else {
               alert('Please select a driver.');
               return;
             }
-            // Update order status to On Way with driver info
-            await api.put(`/pos/orders/${pendingOrderId}`, {
+            
+            const updatePayload = {
               status: 'On Way',
               driverName,
               driverPhone,
-            });
-            fetchData();
-            setIsDriverModalOpen(false);
-            setPendingOrderId(null);
+              driver: { name: driverName, phone: driverPhone }
+            };
+
+            try {
+              await api.put(`/pos/orders/${pendingOrderId}`, updatePayload);
+              fetchData();
+            } catch (err) {
+              if (isConnectionFailure(err) || !navigator.onLine || !err?.response) {
+                queueOfflineUpdate(pendingOrderId, updatePayload);
+                setOrders((current) =>
+                  current.map((order) =>
+                    order._id === pendingOrderId
+                      ? { ...order, ...updatePayload, syncState: 'pending' }
+                      : order
+                  )
+                );
+              } else {
+                console.error("Failed to assign driver:", err);
+                alert(err.response?.data?.message || "Failed to assign driver.");
+              }
+            } finally {
+              setIsDriverModalOpen(false);
+              setPendingOrderId(null);
+            }
           }}
           className="px-4 py-2 text-xs font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-500"
         >
@@ -2705,6 +3095,68 @@ const Orders = () => {
     </div>
   </div>
 )}
+
+      {/* Variant / Portion Size Selection Modal */}
+      {selectedProductForVariant && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-sm overflow-hidden p-5">
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div className="flex items-center gap-3">
+                {selectedProductForVariant.imageUrl ? (
+                  <img
+                    src={selectedProductForVariant.imageUrl}
+                    alt={selectedProductForVariant.name}
+                    className="w-12 h-12 rounded-xl object-cover border border-gray-200"
+                  />
+                ) : (
+                  <div className="w-12 h-12 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 font-bold text-xs">
+                    🍲
+                  </div>
+                )}
+                <div>
+                  <h3 className="font-bold text-gray-900 text-sm leading-snug">{selectedProductForVariant.name}</h3>
+                  <p className="text-[11px] text-gray-500">Choose portion size to add to ticket</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedProductForVariant(null)}
+                className="text-gray-400 hover:text-gray-600 p-1 font-bold text-base"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {selectedProductForVariant.variants.map((v, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => addToCart(selectedProductForVariant, v)}
+                  className="w-full flex items-center justify-between p-3 rounded-xl border border-gray-200 hover:border-blue-500 hover:bg-blue-50/50 transition-all text-left group"
+                >
+                  <div>
+                    <span className="font-bold text-sm text-gray-800 group-hover:text-blue-700 block">
+                      {v.name}
+                    </span>
+                    {v.portionSize && v.portionSize !== v.name && (
+                      <span className="text-[10px] text-gray-400 block">{v.portionSize}</span>
+                    )}
+                  </div>
+                  <span className="font-mono font-bold text-sm text-blue-600 bg-blue-50 group-hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-100 transition-colors">
+                    {currencySymbol}{Number(v.price).toFixed(2)}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={() => setSelectedProductForVariant(null)}
+              className="mt-4 w-full py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
     </div>
   );

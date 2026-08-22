@@ -45,7 +45,7 @@ const Sidebar = () => {
     if (location.pathname.startsWith('/settings')) {
       setOpenMenus(prev => ({ ...prev, 'Settings': true }));
     }
-    const isCatalogActive = ['/categories', '/products', '/dine-in', '/operating-hours'].some(path => location.pathname.includes(path));
+    const isCatalogActive = ['/categories', '/products', '/deals', '/dine-in', '/operating-hours'].some(path => location.pathname.includes(path));
     if (isCatalogActive) {
       setOpenMenus(prev => ({ ...prev, 'Catalog': true }));
     }
@@ -61,7 +61,7 @@ const Sidebar = () => {
     navigate('/login');
   };
 
-  if (location.pathname.includes('/dashboard/orders') || location.pathname.includes('/dashboard/zeplyt-ai') || location.pathname.includes('/dashboard/public-display')) return null;
+  if (location.pathname.includes('/dashboard/orders') || location.pathname.includes('/dashboard/zeplyt-ai') || location.pathname.includes('/dashboard/public-display') || location.pathname.includes('/dashboard/delivery')) return null;
 
   const mainNavItems = navItems.filter(item => !['subscriptions', 'settings', 'catalog', 'analytics'].includes(item.iconKey));
   const systemNavItems = navItems.filter(item => ['catalog', 'settings'].includes(item.iconKey));
